@@ -398,9 +398,16 @@ export default class SynoraPlugin extends Plugin {
     await this.saveSettings();
     this.vaultKey = vaultKey;
     this.needsVaultKeyRecovery = false;
-    new Notice("Vault recovered.");
+    new Notice("Vault recovered. Pulling files…");
 
     const raw = ((await this.loadData()) as Record<string, unknown>) ?? {};
     await this.initEngine(new PluginDataStore(this, raw));
+
+    // Recovery otherwise leaves the vault looking empty until the next
+    // background sync cycle (up to 30s away) - confusing right after
+    // "Vault recovered" says nothing came through yet. Pull immediately
+    // instead of making the user wait or go find the Scan button.
+    await this.engine?.pull();
+    new Notice("Files pulled.");
   }
 }
