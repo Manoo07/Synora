@@ -43,6 +43,13 @@ export interface SyncEngineDeps {
 export class SyncEngine {
   constructor(private deps: SyncEngineDeps) {}
 
+  // Used for an initial vault scan: whether this path has already been
+  // seen (synced before, or already queued), so the scan can skip it
+  // instead of re-enqueueing every file on every run.
+  async isTracked(path: string): Promise<boolean> {
+    return (await this.deps.state.getByPath(path)) !== undefined;
+  }
+
   // --- Outgoing: local vault event -> encrypted, durably queued op -------
 
   async handleLocalChange(

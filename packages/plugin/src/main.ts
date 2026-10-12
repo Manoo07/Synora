@@ -213,6 +213,38 @@ export default class SynoraPlugin extends Plugin {
 
     const raw = ((await this.loadData()) as Record<string, unknown>) ?? {};
     await this.initEngine(new PluginDataStore(this, raw));
+
+    // This is a brand-new vault with nothing on the server yet, so every
+    // file already in the local vault is "new" from the server's point of
+    // view. Without this, the sync engine only ever sees changes from this
+    // point forward - everything that existed before enabling the plugin
+    // would silently never sync. Only correct to do this here (vault
+    // creation): a device joining an *existing* vault should pull what's
+    // already there instead, never dump its own local files into it.
+    await this.scanAndQueueExistingFiles();
+  }
+
+  // Enqueues every vault file the sync engine doesn't already know about.
+  // Safe to call repeatedly - already-tracked files are skipped, so it
+  // also works as a manual "did I miss anything" repair action.
+  async scanAndQueueExistingFiles(): Promise<void> {
+    if (!this.engine) return;
+    const files = this.app.vault.getFiles().filter((f) => !IGNORED_PREFIXES.some((p) => f.path.startsWith(p)));
+
+    let queued = 0;
+    this.updateStatusBar("syncing");
+    for (const file of files) {
+      if (await this.engine.isTracked(file.path)) continue;
+      const content = new Uint8Array(await this.app.vault.readBinary(file));
+      await this.engine.handleLocalChange(file.path, "created", content);
+      queued++;
+    }
+    this.updateStatusBar("idle");
+
+    if (queued > 0) {
+      new Notice(`Synora: queued ${queued} existing file${queued === 1 ? "" : "s"} for sync.`);
+      void this.syncCycle();
+    }
   }
 
   async approveDevice(deviceId: string, devicePublicKeyB64: string): Promise<void> {

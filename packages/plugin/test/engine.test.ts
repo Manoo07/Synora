@@ -37,6 +37,14 @@ describe("SyncEngine", () => {
     globalThis.fetch = realFetch;
   });
 
+  it("isTracked distinguishes files the engine has already seen from ones it hasn't", async () => {
+    const { engine } = buildEngine();
+    expect(await engine.isTracked("note.md")).toBe(false);
+    await engine.handleLocalChange("note.md", "created", new TextEncoder().encode("hello"));
+    expect(await engine.isTracked("note.md")).toBe(true);
+    expect(await engine.isTracked("other.md")).toBe(false);
+  });
+
   it("uploads a locally created file and the server assigns it a fileId", async () => {
     const { engine } = buildEngine();
     await engine.handleLocalChange("note.md", "created", new TextEncoder().encode("hello"));

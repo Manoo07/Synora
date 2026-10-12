@@ -155,6 +155,12 @@ export class SynoraSettingTab extends PluginSettingTab {
     } else {
       this.containerEl.createEl("p", { text: `Vault: ${this.plugin.settings.vaultId}` });
       new Setting(this.containerEl)
+        .setName("Scan vault for existing files")
+        .setDesc("Queues any file not yet synced - safe to run repeatedly, already-synced files are skipped.")
+        .addButton((btn) =>
+          btn.setButtonText("Scan").onClick(() => void this.runBusy(btn, "Scanning...", () => this.plugin.scanAndQueueExistingFiles())),
+        );
+      new Setting(this.containerEl)
         .setName("Pending devices")
         .setDesc("Devices waiting to be approved for this vault.")
         .addButton((btn) =>
