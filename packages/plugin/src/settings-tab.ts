@@ -178,14 +178,19 @@ export class SynoraSettingTab extends PluginSettingTab {
             this.containerEl.createEl("h3", { text: "Or create a separate vault" });
             this.containerEl.createEl("p", { text: "Only do this if you actually want an unrelated, empty vault." });
           }
+          const foundExisting = vaults.length > 0;
           new Setting(this.containerEl)
-            .setName(vaults.length > 0 ? "Create a new, separate vault" : "No vault yet")
-            .addButton((btn) =>
-              btn
-                .setButtonText("Create vault")
-                .setCta()
-                .onClick(() => void this.runBusy(btn, "Creating...", () => this.plugin.createVault())),
-            );
+            .setName(foundExisting ? "Create a new, separate vault" : "No vault yet")
+            .addButton((btn) => {
+              btn.setButtonText(foundExisting ? "Create an unrelated empty vault" : "Create vault").onClick(() =>
+                void this.runBusy(btn, "Creating...", () => this.plugin.createVault()),
+              );
+              // Only the genuinely-first-vault case gets the prominent
+              // purple styling - when an existing vault was found, this
+              // button sitting right next to "Recover vault" with equal
+              // visual weight is exactly what led to a mis-tap, live.
+              if (!foundExisting) btn.setCta();
+            });
         })
         .catch(async (err) => {
           checkingEl.remove();
@@ -204,6 +209,19 @@ export class SynoraSettingTab extends PluginSettingTab {
       this.containerEl.createEl("p", { text: `Vault: ${this.plugin.settings.vaultId}` });
       this.syncStatusEl = this.containerEl.createEl("p", { text: "Checking sync status…" });
       void this.renderSyncStatus();
+      new Setting(this.containerEl)
+        .setName("Wrong vault?")
+        .setDesc(
+          "Detaches this device locally so you can recover the correct vault instead. Doesn't delete anything on the server.",
+        )
+        .addButton((btn) =>
+          btn.setButtonText("Disconnect").onClick(() =>
+            void this.runBusy(btn, "Disconnecting...", async () => {
+              await this.plugin.disconnectFromVault();
+              this.display();
+            }),
+          ),
+        );
       new Setting(this.containerEl)
         .setName("Scan vault for existing files")
         .setDesc("Queues any file not yet synced - safe to run repeatedly, already-synced files are skipped.")

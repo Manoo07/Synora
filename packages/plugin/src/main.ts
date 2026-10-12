@@ -297,6 +297,22 @@ export default class SynoraPlugin extends Plugin {
     return (await this.engine?.pendingUploadCount()) ?? 0;
   }
 
+  // Detaches this device from whatever vault it's currently pointed at -
+  // purely local: nothing is deleted server-side, and the device's
+  // account sign-in and key pair are untouched. For when a device ended
+  // up attached to the wrong vault (confirmed live: a mis-tap landing on
+  // "Create vault" instead of "Recover vault") with no other way back,
+  // since once vaultId is set there was previously no way to change it
+  // short of clearing the plugin's data file directly.
+  async disconnectFromVault(): Promise<void> {
+    this.settings.vaultId = undefined;
+    this.needsVaultKeyRecovery = false;
+    await this.saveSettings();
+    this.vaultKey = undefined;
+    this.engine = undefined;
+    new Notice("Disconnected from vault. Pick Recover vault access to reattach to the right one.");
+  }
+
   async approveDevice(deviceId: string, devicePublicKeyB64: string): Promise<void> {
     if (deviceId === this.settings.deviceId) {
       new Notice("This is the current device - it can't approve itself. Use Recover vault access instead.");
