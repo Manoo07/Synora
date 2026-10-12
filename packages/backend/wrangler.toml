@@ -5,7 +5,7 @@ compatibility_flags = ["nodejs_compat"]
 
 [[r2_buckets]]
 binding = "BUCKET"
-bucket_name = "synora-blobs-dev"
+bucket_name = "synora-bucket"
 
 # Local dev reads straight from the docker-compose Postgres instance (see
 # docker-compose.yml). Production should point this at a hosted Postgres
