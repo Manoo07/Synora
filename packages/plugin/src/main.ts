@@ -379,8 +379,20 @@ export default class SynoraPlugin extends Plugin {
       throw new Error("This recovery code didn't match any vault on this account.");
     }
 
+    // The vaultKey above is already correct and usable regardless of
+    // what happens next - it came from successfully unwrapping the
+    // recovery code against this exact vault, independent of whether
+    // this device has its own device-specific grant yet. So a device
+    // that already has one (e.g. a prior recovery attempt actually
+    // succeeded, and only the local settings were since reset - confirmed
+    // live) isn't an error here, just a no-op for this step.
     const wrappedForSelf = wrapVaultKey(vaultKey, base64ToBytes(devicePublicKeyB64));
-    await this.api.selfRecoverDevice(vaultId, bytesToBase64(wrappedForSelf), 1);
+    try {
+      await this.api.selfRecoverDevice(vaultId, bytesToBase64(wrappedForSelf), 1);
+    } catch (err) {
+      const alreadyEnrolled = err instanceof ApiError && err.status === 403 && /already has access/i.test(err.message);
+      if (!alreadyEnrolled) throw err;
+    }
 
     this.settings.vaultId = vaultId;
     await this.saveSettings();
