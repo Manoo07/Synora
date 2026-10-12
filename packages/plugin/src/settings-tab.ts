@@ -1,4 +1,4 @@
-import { App, Notice, PluginSettingTab, Setting } from "obsidian";
+import { App, ButtonComponent, Notice, PluginSettingTab, Setting } from "obsidian";
 import type SynoraPlugin from "./main.js";
 
 export class SynoraSettingTab extends PluginSettingTab {
@@ -7,9 +7,34 @@ export class SynoraSettingTab extends PluginSettingTab {
   private recoveryPassword = "";
   private recoveryCode = "";
   private pendingNotice = false;
+  // Guards every network-triggering action on this tab against a second
+  // click while the first is still in flight - without this, a button
+  // with no visual feedback gets clicked repeatedly (confirmed live: 7
+  // rapid duplicate login POSTs from one impatient click sequence).
+  private isBusy = false;
 
   constructor(app: App, private plugin: SynoraPlugin) {
     super(app, plugin);
+  }
+
+  // Wraps a button's click handler so the button visibly shows it's
+  // working (disabled + "loading label") and can't be re-triggered until
+  // the action settles, regardless of which other button the user tries
+  // next.
+  private async runBusy(button: ButtonComponent, loadingLabel: string, action: () => Promise<void>): Promise<void> {
+    if (this.isBusy) return;
+    this.isBusy = true;
+    const originalLabel = button.buttonEl.textContent ?? "";
+    button.setDisabled(true).setButtonText(loadingLabel);
+    try {
+      await action();
+    } finally {
+      this.isBusy = false;
+      // On success most handlers call this.display(), which throws this
+      // exact button away - restoring it here only matters on the error
+      // path, where we stay on the same render.
+      button.setDisabled(false).setButtonText(originalLabel);
+    }
   }
 
   display(): void {
@@ -59,9 +84,16 @@ export class SynoraSettingTab extends PluginSettingTab {
 
     new Setting(this.containerEl)
       .addButton((btn) =>
-        btn.setButtonText("Register new account").onClick(() => void this.handleAuth("register")),
+        btn
+          .setButtonText("Register new account")
+          .onClick(() => void this.runBusy(btn, "Registering...", () => this.handleAuth("register"))),
       )
-      .addButton((btn) => btn.setButtonText("Sign in").setCta().onClick(() => void this.handleAuth("login")));
+      .addButton((btn) =>
+        btn
+          .setButtonText("Sign in")
+          .setCta()
+          .onClick(() => void this.runBusy(btn, "Signing in...", () => this.handleAuth("login"))),
+      );
 
     this.containerEl.createEl("h3", { text: "Recover vault access" });
     this.containerEl.createEl("p", {
@@ -85,7 +117,10 @@ export class SynoraSettingTab extends PluginSettingTab {
       }),
     );
     new Setting(this.containerEl).addButton((btn) =>
-      btn.setButtonText("Recover vault").setCta().onClick(() => void this.handleRecovery()),
+      btn
+        .setButtonText("Recover vault")
+        .setCta()
+        .onClick(() => void this.runBusy(btn, "Recovering...", () => this.handleRecovery())),
     );
   }
 
@@ -111,15 +146,21 @@ export class SynoraSettingTab extends PluginSettingTab {
       new Setting(this.containerEl)
         .setName("No vault yet")
         .addButton((btn) =>
-          btn.setButtonText("Create vault").setCta().onClick(() => void this.plugin.createVault()),
+          btn
+            .setButtonText("Create vault")
+            .setCta()
+            .onClick(() => void this.runBusy(btn, "Creating...", () => this.plugin.createVault())),
         );
     } else {
       this.containerEl.createEl("p", { text: `Vault: ${this.plugin.settings.vaultId}` });
       new Setting(this.containerEl)
         .setName("Pending devices")
         .setDesc("Devices waiting to be approved for this vault.")
-        .addButton((btn) => btn.setButtonText("Refresh").onClick(() => void this.renderPendingDevices()));
+        .addButton((btn) =>
+          btn.setButtonText("Refresh").onClick(() => void this.runBusy(btn, "Loading...", () => this.renderPendingDevices())),
+        );
       this.pendingListEl = this.containerEl.createDiv();
+      this.pendingListEl.createEl("p", { text: "Loading…" });
       void this.renderPendingDevices();
     }
   }
@@ -131,16 +172,23 @@ export class SynoraSettingTab extends PluginSettingTab {
     this.pendingListEl.empty();
     try {
       const { pending } = await this.plugin.api.listDevices(this.plugin.settings.vaultId);
+      if (pending.length === 0) {
+        this.pendingListEl.createEl("p", { text: "No devices waiting." });
+      }
       for (const device of pending as Array<{ id: string; name: string; publicKey: string }>) {
         new Setting(this.pendingListEl).setName(device.name).addButton((btn) =>
           btn
             .setButtonText("Approve")
             .setCta()
-            .onClick(() => void this.plugin.approveDevice(device.id, device.publicKey)),
+            .onClick(() =>
+              void this.runBusy(btn, "Approving...", () => this.plugin.approveDevice(device.id, device.publicKey)),
+            ),
         );
       }
-    } catch {
-      this.pendingListEl.createEl("p", { text: "Could not load pending devices." });
+    } catch (err) {
+      this.pendingListEl.createEl("p", {
+        text: `Could not load pending devices: ${err instanceof Error ? err.message : String(err)}`,
+      });
     }
   }
 
