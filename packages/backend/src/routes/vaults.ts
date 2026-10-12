@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { AppEnv } from "../context.js";
 import { vaults, vaultMembers, wrappedVaultKeys, devices } from "../db/schema.js";
@@ -107,9 +107,13 @@ vaultRoutes.post("/:vaultId/devices", requireAuth, async (c) => {
 vaultRoutes.get("/:vaultId/devices", requireAuth, async (c) => {
   const vaultId = c.req.param("vaultId");
   await requireVaultAccess(c, vaultId);
+  // wrappedVaultKeys.holderId is `text` (it also holds the literal
+  // string "recovery" for the recovery-key row), while devices.id is a
+  // real `uuid` column - Postgres has no `uuid = text` operator, so the
+  // join needs an explicit cast on one side.
   const rows = await c.env.DB.select({ device: devices })
     .from(wrappedVaultKeys)
-    .innerJoin(devices, eq(devices.id, wrappedVaultKeys.holderId))
+    .innerJoin(devices, sql`${devices.id}::text = ${wrappedVaultKeys.holderId}`)
     .where(eq(wrappedVaultKeys.vaultId, vaultId));
   // Also surface devices for this user that are pending enrollment (no
   // wrapped key row yet) so a trusted device can see what needs approving.

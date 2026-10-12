@@ -98,6 +98,20 @@ describe("vaults and device isolation", () => {
     expect(keyRes.status).toBe(200);
     const keyBody = (await keyRes.json()) as { wrappedKey: string };
     expect(keyBody.wrappedKey).toBe("wrapped-for-device-2");
+
+    // GET .../devices joins devices against wrappedVaultKeys by holderId,
+    // which is `text` (it also holds the literal "recovery") against
+    // devices.id's real `uuid` column - this previously threw
+    // `operator does not exist: uuid = text` for any vault with at least
+    // one actually-enrolled device, caught live against production.
+    const listRes = await app.request(
+      `/v1/vaults/${vault.id}/devices`,
+      { headers: { authorization: `Bearer ${alice.accessToken}` } },
+      bindings,
+    );
+    expect(listRes.status).toBe(200);
+    const listBody = (await listRes.json()) as { enrolled: Array<{ id: string }> };
+    expect(listBody.enrolled.map((d) => d.id).sort()).toEqual([alice.deviceId, secondDeviceId].sort());
   });
 
   it("revokes a device so it can no longer authenticate for new requests", async () => {
