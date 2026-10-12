@@ -1,0 +1,24 @@
+export interface SynoraSettings {
+  serverUrl: string;
+  deviceName: string;
+  syncIntervalSeconds: number;
+
+  // Populated once signed in. The device secret key never leaves this
+  // device by design; it lives here because Obsidian's plugin data file
+  // is the only durable local storage available to a plugin. The vault
+  // key itself is deliberately NOT persisted here - it's re-derived each
+  // session by unwrapping wrappedKey (fetched from the server) with
+  // deviceSecretKeyB64, and kept in memory only.
+  email?: string;
+  deviceId?: string;
+  devicePublicKeyB64?: string;
+  deviceSecretKeyB64?: string;
+  accessToken?: string;
+  vaultId?: string;
+}
+
+export const DEFAULT_SETTINGS: SynoraSettings = {
+  serverUrl: "http://localhost:8787",
+  deviceName: "Obsidian device",
+  syncIntervalSeconds: 30,
+};

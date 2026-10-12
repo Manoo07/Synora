@@ -1,0 +1,9 @@
+node_modules/
+.wrangler/
+dist/
+packages/plugin/main.js
+packages/plugin/*.js.map
+*.log
+.env
+.env.local
+.DS_Store

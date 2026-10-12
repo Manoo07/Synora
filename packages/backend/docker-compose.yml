@@ -1,0 +1,14 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: synora
+      POSTGRES_PASSWORD: synora
+      POSTGRES_DB: synora
+    ports:
+      - "5435:5432"
+    volumes:
+      - synora-pg-data:/var/lib/postgresql/data
+
+volumes:
+  synora-pg-data:

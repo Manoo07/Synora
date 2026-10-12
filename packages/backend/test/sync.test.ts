@@ -1,0 +1,209 @@
+import { beforeEach, afterAll, describe, expect, it } from "vitest";
+import { app } from "../src/index.js";
+import { resetDb, testBindings, closeTestDb } from "./setup.js";
+import { registerUser, createVault, requestUpload, putBlob, commit } from "./helpers.js";
+
+describe("sync protocol", () => {
+  beforeEach(resetDb);
+  afterAll(closeTestDb);
+
+  it("creates a file, then commits an update against the correct base version", async () => {
+    const bindings = testBindings();
+    const alice = await registerUser(bindings, "alice@example.com");
+    const vault = await createVault(bindings, alice.accessToken);
+
+    const upload1 = await requestUpload(bindings, alice.accessToken, vault.id);
+    const blob1 = await putBlob(bindings, alice.accessToken, upload1.uploadUrl, "version one");
+    const create = await commit(bindings, alice.accessToken, vault.id, {
+      blobKey: blob1.blobKey,
+      ciphertextHash: blob1.ciphertextHash,
+      sizeBytes: blob1.sizeBytes,
+      operation: "created",
+      idempotencyKey: "op-1",
+    });
+    expect(create.status).toBe(200);
+    expect(create.body.status).toBe("committed");
+    const fileId = create.body.fileId as string;
+    const v1 = create.body.versionId as string;
+
+    const upload2 = await requestUpload(bindings, alice.accessToken, vault.id);
+    const blob2 = await putBlob(bindings, alice.accessToken, upload2.uploadUrl, "version two");
+    const update = await commit(bindings, alice.accessToken, vault.id, {
+      fileId,
+      baseVersionId: v1,
+      blobKey: blob2.blobKey,
+      ciphertextHash: blob2.ciphertextHash,
+      sizeBytes: blob2.sizeBytes,
+      operation: "updated",
+      idempotencyKey: "op-2",
+    });
+    expect(update.status).toBe(200);
+    expect((update.body as { sequence: number }).sequence).toBe(2);
+  });
+
+  it("retrying the same idempotencyKey returns the original result instead of double-committing", async () => {
+    const bindings = testBindings();
+    const alice = await registerUser(bindings, "alice@example.com");
+    const vault = await createVault(bindings, alice.accessToken);
+
+    const upload = await requestUpload(bindings, alice.accessToken, vault.id);
+    const blob = await putBlob(bindings, alice.accessToken, upload.uploadUrl, "content");
+    const body = {
+      blobKey: blob.blobKey,
+      ciphertextHash: blob.ciphertextHash,
+      sizeBytes: blob.sizeBytes,
+      operation: "created",
+      idempotencyKey: "same-key",
+    };
+
+    const first = await commit(bindings, alice.accessToken, vault.id, body);
+    const second = await commit(bindings, alice.accessToken, vault.id, body);
+
+    expect(first.body).toEqual(second.body);
+
+    const changesRes = await app.request(
+      `/v1/vaults/${vault.id}/changes`,
+      { headers: { authorization: `Bearer ${alice.accessToken}` } },
+      bindings,
+    );
+    const changes = (await changesRes.json()) as { changes: unknown[] };
+    expect(changes.changes).toHaveLength(1);
+  });
+
+  it("the core race condition: a stale commit is rejected, not silently overwritten", async () => {
+    const bindings = testBindings();
+    const alice = await registerUser(bindings, "alice@example.com");
+    const vault = await createVault(bindings, alice.accessToken);
+
+    const upload1 = await requestUpload(bindings, alice.accessToken, vault.id);
+    const blob1 = await putBlob(bindings, alice.accessToken, upload1.uploadUrl, "base content");
+    const create = await commit(bindings, alice.accessToken, vault.id, {
+      blobKey: blob1.blobKey,
+      ciphertextHash: blob1.ciphertextHash,
+      sizeBytes: blob1.sizeBytes,
+      operation: "created",
+      idempotencyKey: "create",
+    });
+    const fileId = create.body.fileId as string;
+    const baseVersion = create.body.versionId as string;
+
+    // Device A and device B both start from `baseVersion`. Device A wins
+    // the race and commits version 14 first.
+    const uploadA = await requestUpload(bindings, alice.accessToken, vault.id);
+    const blobA = await putBlob(bindings, alice.accessToken, uploadA.uploadUrl, "device A edit");
+    const commitA = await commit(bindings, alice.accessToken, vault.id, {
+      fileId,
+      baseVersionId: baseVersion,
+      blobKey: blobA.blobKey,
+      ciphertextHash: blobA.ciphertextHash,
+      sizeBytes: blobA.sizeBytes,
+      operation: "updated",
+      idempotencyKey: "device-a-edit",
+    });
+    expect(commitA.status).toBe(200);
+    expect(commitA.body.status).toBe("committed");
+
+    // Device B, unaware A already moved the file forward, tries to commit
+    // against the now-stale `baseVersion`.
+    const uploadB = await requestUpload(bindings, alice.accessToken, vault.id);
+    const blobB = await putBlob(bindings, alice.accessToken, uploadB.uploadUrl, "device B edit");
+    const commitB = await commit(bindings, alice.accessToken, vault.id, {
+      fileId,
+      baseVersionId: baseVersion,
+      blobKey: blobB.blobKey,
+      ciphertextHash: blobB.ciphertextHash,
+      sizeBytes: blobB.sizeBytes,
+      operation: "updated",
+      idempotencyKey: "device-b-edit",
+    });
+
+    expect(commitB.status).toBe(409);
+    expect(commitB.body.status).toBe("conflict");
+    expect(commitB.body.currentVersionId).toBe(commitA.body.versionId);
+
+    // Device A's version must still be the one the server considers
+    // current -- B's rejected commit must not have overwritten it.
+    const changesRes = await app.request(
+      `/v1/vaults/${vault.id}/changes`,
+      { headers: { authorization: `Bearer ${alice.accessToken}` } },
+      bindings,
+    );
+    const changes = (await changesRes.json()) as { changes: Array<{ versionId: string }> };
+    expect(changes.changes.at(-1)!.versionId).toBe(commitA.body.versionId);
+  });
+
+  it("rejects a commit whose declared hash does not match the uploaded blob", async () => {
+    const bindings = testBindings();
+    const alice = await registerUser(bindings, "alice@example.com");
+    const vault = await createVault(bindings, alice.accessToken);
+
+    const upload = await requestUpload(bindings, alice.accessToken, vault.id);
+    const blob = await putBlob(bindings, alice.accessToken, upload.uploadUrl, "content");
+
+    const res = await commit(bindings, alice.accessToken, vault.id, {
+      blobKey: blob.blobKey,
+      ciphertextHash: "0".repeat(64),
+      sizeBytes: blob.sizeBytes,
+      operation: "created",
+      idempotencyKey: "bad-hash",
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("round-trips an uploaded blob through download", async () => {
+    const bindings = testBindings();
+    const alice = await registerUser(bindings, "alice@example.com");
+    const vault = await createVault(bindings, alice.accessToken);
+
+    const upload = await requestUpload(bindings, alice.accessToken, vault.id);
+    const blob = await putBlob(bindings, alice.accessToken, upload.uploadUrl, "hello vault");
+
+    const res = await app.request(
+      `/v1/vaults/${vault.id}/objects/${encodeURIComponent(blob.blobKey)}`,
+      { headers: { authorization: `Bearer ${alice.accessToken}` } },
+      bindings,
+    );
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("hello vault");
+  });
+
+  it("tracks ack cursors and pending count via status", async () => {
+    const bindings = testBindings();
+    const alice = await registerUser(bindings, "alice@example.com");
+    const vault = await createVault(bindings, alice.accessToken);
+
+    const upload = await requestUpload(bindings, alice.accessToken, vault.id);
+    const blob = await putBlob(bindings, alice.accessToken, upload.uploadUrl, "content");
+    await commit(bindings, alice.accessToken, vault.id, {
+      blobKey: blob.blobKey,
+      ciphertextHash: blob.ciphertextHash,
+      sizeBytes: blob.sizeBytes,
+      operation: "created",
+      idempotencyKey: "op-1",
+    });
+
+    const statusBefore = await app.request(
+      `/v1/vaults/${vault.id}/status`,
+      { headers: { authorization: `Bearer ${alice.accessToken}` } },
+      bindings,
+    );
+    expect((await statusBefore.json()) as { pendingCount: number }).toMatchObject({ pendingCount: 1 });
+
+    await app.request(
+      `/v1/vaults/${vault.id}/acks`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${alice.accessToken}` },
+        body: JSON.stringify({ lastSequence: 1 }),
+      },
+      bindings,
+    );
+
+    const statusAfter = await app.request(
+      `/v1/vaults/${vault.id}/status`,
+      { headers: { authorization: `Bearer ${alice.accessToken}` } },
+      bindings,
+    );
+    expect((await statusAfter.json()) as { pendingCount: number }).toMatchObject({ pendingCount: 0 });
+  });
+});

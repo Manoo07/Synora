@@ -1,0 +1,21 @@
+name = "synora-backend"
+main = "src/index.ts"
+compatibility_date = "2024-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "synora-blobs-dev"
+
+# Local dev reads straight from the docker-compose Postgres instance (see
+# docker-compose.yml). Production should point this at a hosted Postgres
+# instance via the Cloudflare dashboard / `wrangler hyperdrive create`.
+[[hyperdrive]]
+binding = "HYPERDRIVE"
+id = "local-dev-placeholder"
+localConnectionString = "postgres://synora:synora@localhost:5435/synora"
+
+[vars]
+# Replace before any real deployment. Secrets should be set via
+# `wrangler secret put JWT_SECRET` instead of a plaintext var.
+JWT_SECRET = "dev-only-secret-change-me"
