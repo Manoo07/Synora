@@ -266,10 +266,19 @@ export default class SynoraPlugin extends Plugin {
   // also works as a manual "did I miss anything" repair action.
   async scanAndQueueExistingFiles(): Promise<void> {
     if (!this.engine) return;
-    const files = this.app.vault.getFiles().filter((f) => !IGNORED_PREFIXES.some((p) => f.path.startsWith(p)));
-
-    let queued = 0;
     void this.updateStatusBar("syncing");
+
+    // Pull first, always. "isTracked" only reflects this device's own
+    // sync history - without catching up to the server's state first, a
+    // device that hasn't pulled yet (most exposed right after recovering
+    // into an *existing* vault) would see every one of its own local
+    // files as "new" and could create a second, unrelated file record
+    // for a path the server already has, since paths are encrypted and
+    // the server has no way to catch that collision on its own.
+    await this.engine.pull();
+
+    const files = this.app.vault.getFiles().filter((f) => !IGNORED_PREFIXES.some((p) => f.path.startsWith(p)));
+    let queued = 0;
     for (const file of files) {
       if (await this.engine.isTracked(file.path)) continue;
       const content = new Uint8Array(await this.app.vault.readBinary(file));
