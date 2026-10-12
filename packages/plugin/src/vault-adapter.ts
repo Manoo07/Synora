@@ -30,11 +30,25 @@ export class ObsidianVaultAdapter implements VaultAdapter {
     if (file) await this.vault.delete(file);
   }
 
+  // Creates every missing ancestor directory, one level at a time, rather
+  // than trusting a single createFolder(deeplyNestedPath) call to create
+  // intermediate directories on its own. Confirmed live: on at least one
+  // platform this silently failed for a multi-level-deep path (nothing
+  // thrown here - the swallowed failure instead surfaced later as an
+  // unhandled error from the actual file write, aborting the whole pull
+  // with no visible error).
   private async ensureParentFolder(path: string): Promise<void> {
     const parent = path.slice(0, path.lastIndexOf("/"));
-    if (!parent || this.vault.getAbstractFileByPath(parent)) return;
-    await this.vault.createFolder(parent).catch(() => {
-      // Races with another create are fine; the folder exists either way.
-    });
+    if (!parent) return;
+    const segments = parent.split("/");
+    let current = "";
+    for (const segment of segments) {
+      current = current ? `${current}/${segment}` : segment;
+      if (this.vault.getAbstractFileByPath(current)) continue;
+      await this.vault.createFolder(current).catch(() => {
+        // Another write racing to create the same folder is fine - only
+        // matters that it exists by the time we reach the next segment.
+      });
+    }
   }
 }
