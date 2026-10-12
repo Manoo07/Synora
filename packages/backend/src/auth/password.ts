@@ -3,7 +3,12 @@
 // binding, so this is the practical choice here. Replace with a vetted
 // hosted auth provider before real users — see protocol-spec.md §2 and the
 // architecture doc's "do not invent authentication" note.
-const ITERATIONS = 310_000;
+//
+// 100,000 is the real `workerd` runtime's hard cap on PBKDF2 iterations
+// (confirmed in production: higher counts throw `NotSupportedError` there,
+// even though Miniflare's local dev crypto backend silently allows more -
+// this exact mismatch is why it worked in `wrangler dev` but not deployed).
+const ITERATIONS = 100_000;
 const SALT_BYTES = 16;
 const KEY_LENGTH = 32;
 
