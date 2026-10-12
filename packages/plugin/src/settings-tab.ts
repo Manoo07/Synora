@@ -18,6 +18,7 @@ export class SynoraSettingTab extends PluginSettingTab {
     new Setting(this.containerEl).setName("Server URL").addText((text) =>
       text.setValue(this.plugin.settings.serverUrl).onChange(async (value) => {
         this.plugin.settings.serverUrl = value;
+        this.plugin.api.setBaseUrl(value);
         await this.plugin.saveSettings();
       }),
     );

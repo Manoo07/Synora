@@ -4,6 +4,34 @@ export class ApiError extends Error {
   }
 }
 
+// Minimal response shape both a `fetch` Response and Obsidian's
+// `requestUrl` result can satisfy. Kept this narrow (not `fetch`'s full
+// Response type) specifically so this file never imports from "obsidian" -
+// that's what lets api/client.ts be unit tested with a plain mocked
+// `fetch` in Node, with no Obsidian runtime involved.
+export interface TransportResponse {
+  status: number;
+  arrayBuffer(): Promise<ArrayBuffer>;
+  text(): Promise<string>;
+}
+
+export type Transport = (
+  url: string,
+  init: { method: string; headers: Record<string, string>; body?: ArrayBuffer | string },
+) => Promise<TransportResponse>;
+
+// Obsidian's desktop app enforces a CSP that blocks the browser `fetch`
+// API from reaching arbitrary external hosts (surfaces as a generic
+// "Failed to fetch", no useful detail). Obsidian's own `requestUrl` API
+// goes through Electron's net layer instead and isn't subject to that CSP -
+// this default transport is for tests/Node; main.ts wires in an
+// `requestUrl`-based transport for the real plugin. See
+// src/obsidian-transport.ts.
+const fetchTransport: Transport = async (url, init) => {
+  const res = await fetch(url, { method: init.method, headers: init.headers, body: init.body });
+  return { status: res.status, arrayBuffer: () => res.arrayBuffer(), text: () => res.text() };
+};
+
 export interface Change {
   sequence: number;
   fileId: string;
@@ -33,10 +61,14 @@ export type CommitResult =
 export class SynoraApiClient {
   private accessToken: string | undefined;
 
-  constructor(private baseUrl: string) {}
+  constructor(private baseUrl: string, private transport: Transport = fetchTransport) {}
 
   setAccessToken(token: string | undefined) {
     this.accessToken = token;
+  }
+
+  setBaseUrl(baseUrl: string) {
+    this.baseUrl = baseUrl;
   }
 
   private async request<T>(
@@ -46,7 +78,7 @@ export class SynoraApiClient {
     const headers: Record<string, string> = {};
     if (this.accessToken) headers.authorization = `Bearer ${this.accessToken}`;
 
-    let body: BodyInit | undefined;
+    let body: ArrayBuffer | string | undefined;
     if (init.raw !== undefined) {
       body = init.raw.slice().buffer as ArrayBuffer;
     } else if (init.body !== undefined) {
@@ -54,21 +86,23 @@ export class SynoraApiClient {
       body = JSON.stringify(init.body);
     }
 
-    const res = await fetch(`${this.baseUrl}${path}`, { method: init.method ?? "GET", headers, body });
-    if (!res.ok && !init.acceptStatuses?.includes(res.status)) {
-      let message = res.statusText;
+    const res = await this.transport(`${this.baseUrl}${path}`, { method: init.method ?? "GET", headers, body });
+    const ok = res.status >= 200 && res.status < 300;
+    if (!ok && !init.acceptStatuses?.includes(res.status)) {
+      let message = `HTTP ${res.status}`;
       let code = "unknown";
       try {
-        const errBody = (await res.json()) as { code?: string; error?: string; message?: string };
+        const errBody = JSON.parse(await res.text()) as { code?: string; error?: string; message?: string };
         code = errBody.code ?? errBody.error ?? code;
         message = errBody.message ?? message;
       } catch {
-        // non-JSON error body; fall back to statusText
+        // non-JSON error body; fall back to the generic message above
       }
       throw new ApiError(res.status, code, message);
     }
     if (res.status === 204) return undefined as T;
-    return (await res.json()) as T;
+    const text = await res.text();
+    return (text ? JSON.parse(text) : undefined) as T;
   }
 
   register(params: { email: string; password: string; devicePublicKey: string; deviceName?: string }) {
@@ -160,10 +194,12 @@ export class SynoraApiClient {
   async getObject(vaultId: string, blobKey: string): Promise<Uint8Array> {
     const headers: Record<string, string> = {};
     if (this.accessToken) headers.authorization = `Bearer ${this.accessToken}`;
-    const res = await fetch(`${this.baseUrl}/v1/vaults/${vaultId}/objects/${encodeURIComponent(blobKey)}`, {
+    const res = await this.transport(`${this.baseUrl}/v1/vaults/${vaultId}/objects/${encodeURIComponent(blobKey)}`, {
+      method: "GET",
       headers,
     });
-    if (!res.ok) throw new ApiError(res.status, "download_failed", res.statusText);
+    const ok = res.status >= 200 && res.status < 300;
+    if (!ok) throw new ApiError(res.status, "download_failed", `HTTP ${res.status}`);
     return new Uint8Array(await res.arrayBuffer());
   }
 

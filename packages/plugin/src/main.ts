@@ -1,6 +1,7 @@
 import { Notice, Plugin, TAbstractFile, TFile } from "obsidian";
 import { sha256 } from "@noble/hashes/sha256";
 import { SynoraApiClient } from "./api/client.js";
+import { obsidianTransport } from "./api/obsidian-transport.js";
 import { SyncEngine } from "./sync/engine.js";
 import { SyncQueue } from "./sync/queue.js";
 import { LocalStateStore } from "./sync/local-state.js";
@@ -54,7 +55,7 @@ export default class SynoraPlugin extends Plugin {
     this.settings = { ...DEFAULT_SETTINGS, ...(raw.settings as Partial<SynoraSettings>) };
     const store = new PluginDataStore(this, raw);
 
-    this.api = new SynoraApiClient(this.settings.serverUrl);
+    this.api = new SynoraApiClient(this.settings.serverUrl, obsidianTransport);
     if (this.settings.accessToken) this.api.setAccessToken(this.settings.accessToken);
 
     if (this.settings.vaultId && this.settings.deviceSecretKeyB64) {
