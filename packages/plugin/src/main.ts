@@ -1,6 +1,6 @@
 import { Notice, Plugin, TAbstractFile, TFile } from "obsidian";
 import { sha256 } from "@noble/hashes/sha256";
-import { SynoraApiClient } from "./api/client.js";
+import { ApiError, SynoraApiClient } from "./api/client.js";
 import { obsidianTransport } from "./api/obsidian-transport.js";
 import { SyncEngine } from "./sync/engine.js";
 import { SyncQueue } from "./sync/queue.js";
@@ -138,6 +138,17 @@ export default class SynoraPlugin extends Plugin {
     } catch (err) {
       console.error("Synora: sync cycle failed", err);
       this.updateStatusBar("error");
+      // A stale token stops every future sync cycle identically, forever,
+      // with only a silent status-bar icon as a clue. Stop and say so
+      // plainly rather than retrying the same failure on every interval -
+      // the open settings tab (if any) picks this up on its own next
+      // render via the same 401 check.
+      if (err instanceof ApiError && err.status === 401) {
+        this.engine = undefined;
+        this.settings.accessToken = undefined;
+        await this.saveSettings();
+        new Notice("Synora: your session expired. Open settings to sign in again.");
+      }
     }
   }
 

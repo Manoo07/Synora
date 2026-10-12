@@ -1,6 +1,15 @@
 import { SignJWT, jwtVerify } from "jose";
 
-const ACCESS_TOKEN_TTL_SECONDS = 15 * 60; // short-lived by design — protocol-spec §2
+// Deliberately long-lived: this app has no refresh-token flow, so a short
+// TTL just means the plugin silently breaks every 15 minutes with no way
+// to recover short of a fresh password login (confirmed live — the UI was
+// stuck showing "signed in" with every call failing "Invalid or expired
+// token"). The real security boundary here is device *revocation*
+// (requireAuth checks device.status on every request), not token expiry -
+// an active device should stay trusted until explicitly revoked, matching
+// how desktop/mobile apps in this shape normally work. Revisit if a
+// refresh-token flow is ever added.
+const ACCESS_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 days
 
 export interface AccessTokenClaims {
   sub: string; // userId

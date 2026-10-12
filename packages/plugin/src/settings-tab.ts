@@ -1,5 +1,6 @@
 import { App, ButtonComponent, Notice, PluginSettingTab, Setting } from "obsidian";
 import type SynoraPlugin from "./main.js";
+import { ApiError } from "./api/client.js";
 
 export class SynoraSettingTab extends PluginSettingTab {
   private password = "";
@@ -186,10 +187,27 @@ export class SynoraSettingTab extends PluginSettingTab {
         );
       }
     } catch (err) {
+      if (await this.handleIfSessionExpired(err)) return;
       this.pendingListEl.createEl("p", {
         text: `Could not load pending devices: ${err instanceof Error ? err.message : String(err)}`,
       });
     }
+  }
+
+  // A stale access token doesn't mean "signed out" from the server's
+  // perspective (the device stays active) - it just means this JWT
+  // stopped working. Before this, the UI kept showing "Signed in as ..."
+  // forever while every call silently failed "Invalid or expired token",
+  // with no way back in short of restarting Obsidian. Dropping the token
+  // and re-rendering into the sign-in form (same email, device keys
+  // intact) is the honest and recoverable state to show instead.
+  private async handleIfSessionExpired(err: unknown): Promise<boolean> {
+    if (!(err instanceof ApiError) || err.status !== 401) return false;
+    this.plugin.settings.accessToken = undefined;
+    await this.plugin.saveSettings();
+    new Notice("Your session expired. Please sign in again.");
+    this.display();
+    return true;
   }
 
   private async handleAuth(mode: "register" | "login"): Promise<void> {
