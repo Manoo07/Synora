@@ -45,6 +45,16 @@ describe("SyncEngine", () => {
     expect(await engine.isTracked("other.md")).toBe(false);
   });
 
+  it("pendingUploadCount reflects queued-but-not-yet-flushed files", async () => {
+    const { engine } = buildEngine();
+    expect(await engine.pendingUploadCount()).toBe(0);
+    await engine.handleLocalChange("a.md", "created", new TextEncoder().encode("a"));
+    await engine.handleLocalChange("b.md", "created", new TextEncoder().encode("b"));
+    expect(await engine.pendingUploadCount()).toBe(2);
+    await engine.flush();
+    expect(await engine.pendingUploadCount()).toBe(0);
+  });
+
   it("uploads a locally created file and the server assigns it a fileId", async () => {
     const { engine } = buildEngine();
     await engine.handleLocalChange("note.md", "created", new TextEncoder().encode("hello"));

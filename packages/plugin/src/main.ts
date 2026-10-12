@@ -66,7 +66,7 @@ export default class SynoraPlugin extends Plugin {
 
     this.addSettingTab(new SynoraSettingTab(this.app, this));
     this.statusBarEl = this.addStatusBarItem();
-    this.updateStatusBar("idle");
+    void this.updateStatusBar("idle");
 
     this.registerEvent(this.app.vault.on("create", (f) => this.onVaultEvent(f, "created")));
     this.registerEvent(this.app.vault.on("modify", (f) => this.onVaultEvent(f, "updated")));
@@ -155,13 +155,13 @@ export default class SynoraPlugin extends Plugin {
   async syncCycle(): Promise<void> {
     if (!this.engine) return;
     try {
-      this.updateStatusBar("syncing");
+      void this.updateStatusBar("syncing");
       await this.engine.flush();
       await this.engine.pull();
-      this.updateStatusBar("idle");
+      await this.updateStatusBar("idle");
     } catch (err) {
       console.error("Synora: sync cycle failed", err);
-      this.updateStatusBar("error");
+      void this.updateStatusBar("error");
       // A stale token stops every future sync cycle identically, forever,
       // with only a silent status-bar icon as a clue. Stop and say so
       // plainly rather than retrying the same failure on every interval -
@@ -176,10 +176,23 @@ export default class SynoraPlugin extends Plugin {
     }
   }
 
-  private updateStatusBar(state: "idle" | "syncing" | "error"): void {
+  private async updateStatusBar(state: "idle" | "syncing" | "error"): Promise<void> {
     if (!this.statusBarEl) return;
-    const icon = state === "syncing" ? "⟳" : state === "error" ? "⚠" : "✓";
-    this.statusBarEl.setText(`Synora ${icon}`);
+    if (state === "syncing") {
+      this.statusBarEl.setText("Synora ⟳");
+      return;
+    }
+    if (state === "error") {
+      this.statusBarEl.setText("Synora ⚠");
+      return;
+    }
+    // "idle" on its own doesn't say whether there's still unsent work -
+    // the whole point of a clean "fully synced" signal is distinguishing
+    // "nothing happening right now" from "everything is actually caught
+    // up," which flush()/pull() finishing doesn't guarantee on its own
+    // (a flush can leave a just-re-queued conflict copy behind, say).
+    const pending = (await this.engine?.pendingUploadCount()) ?? 0;
+    this.statusBarEl.setText(pending > 0 ? `Synora ⟳ ${pending} pending` : "Synora ✓ Synced");
   }
 
   async saveSettings(): Promise<void> {
@@ -256,19 +269,23 @@ export default class SynoraPlugin extends Plugin {
     const files = this.app.vault.getFiles().filter((f) => !IGNORED_PREFIXES.some((p) => f.path.startsWith(p)));
 
     let queued = 0;
-    this.updateStatusBar("syncing");
+    void this.updateStatusBar("syncing");
     for (const file of files) {
       if (await this.engine.isTracked(file.path)) continue;
       const content = new Uint8Array(await this.app.vault.readBinary(file));
       await this.engine.handleLocalChange(file.path, "created", content);
       queued++;
     }
-    this.updateStatusBar("idle");
+    await this.updateStatusBar("idle");
 
     if (queued > 0) {
       new Notice(`Synora: queued ${queued} existing file${queued === 1 ? "" : "s"} for sync.`);
       void this.syncCycle();
     }
+  }
+
+  async getPendingUploadCount(): Promise<number> {
+    return (await this.engine?.pendingUploadCount()) ?? 0;
   }
 
   async approveDevice(deviceId: string, devicePublicKeyB64: string): Promise<void> {

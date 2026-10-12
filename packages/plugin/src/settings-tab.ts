@@ -166,11 +166,18 @@ export class SynoraSettingTab extends PluginSettingTab {
         );
     } else {
       this.containerEl.createEl("p", { text: `Vault: ${this.plugin.settings.vaultId}` });
+      this.syncStatusEl = this.containerEl.createEl("p", { text: "Checking sync status…" });
+      void this.renderSyncStatus();
       new Setting(this.containerEl)
         .setName("Scan vault for existing files")
         .setDesc("Queues any file not yet synced - safe to run repeatedly, already-synced files are skipped.")
         .addButton((btn) =>
-          btn.setButtonText("Scan").onClick(() => void this.runBusy(btn, "Scanning...", () => this.plugin.scanAndQueueExistingFiles())),
+          btn.setButtonText("Scan").onClick(() =>
+            void this.runBusy(btn, "Scanning...", async () => {
+              await this.plugin.scanAndQueueExistingFiles();
+              await this.renderSyncStatus();
+            }),
+          ),
         );
       new Setting(this.containerEl)
         .setName("Pending devices")
@@ -182,6 +189,20 @@ export class SynoraSettingTab extends PluginSettingTab {
       this.pendingListEl.createEl("p", { text: "Loading…" });
       void this.renderPendingDevices();
     }
+  }
+
+  private syncStatusEl?: HTMLElement;
+
+  // The clean "yes, everything is synced" signal the status bar alone
+  // doesn't give: zero items left in this device's local upload queue.
+  // Distinct from "nothing is happening right now" - a flush can finish
+  // and still leave something queued (e.g. a conflict it just re-filed).
+  private async renderSyncStatus(): Promise<void> {
+    if (!this.syncStatusEl) return;
+    const pending = await this.plugin.getPendingUploadCount();
+    this.syncStatusEl.setText(
+      pending > 0 ? `⟳ ${pending} file${pending === 1 ? "" : "s"} waiting to upload` : "✓ All files synced",
+    );
   }
 
   private pendingListEl?: HTMLElement;

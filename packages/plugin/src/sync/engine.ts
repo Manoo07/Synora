@@ -50,6 +50,14 @@ export class SyncEngine {
     return (await this.deps.state.getByPath(path)) !== undefined;
   }
 
+  // Number of local edits/creates not yet uploaded. Zero means this
+  // device has nothing outstanding to push - the UI's "fully synced"
+  // signal (not the same thing as "nothing left to pull"; see
+  // SynoraApiClient.status for the remote side of that).
+  async pendingUploadCount(): Promise<number> {
+    return (await this.deps.queue.list()).length;
+  }
+
   // --- Outgoing: local vault event -> encrypted, durably queued op -------
 
   async handleLocalChange(
