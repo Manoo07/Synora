@@ -98,6 +98,10 @@ export class SynoraSettingTab extends PluginSettingTab {
           .onClick(() => void this.runBusy(btn, "Signing in...", () => this.handleAuth("login"))),
       );
 
+    this.renderRecoveryForm();
+  }
+
+  private renderRecoveryForm(): void {
     this.containerEl.createEl("h3", { text: "Recover vault access" });
     this.containerEl.createEl("p", {
       text: "No other trusted device around? Use the recovery code shown when the vault was created.",
@@ -156,14 +160,46 @@ export class SynoraSettingTab extends PluginSettingTab {
     });
 
     if (!this.plugin.settings.vaultId) {
-      new Setting(this.containerEl)
-        .setName("No vault yet")
-        .addButton((btn) =>
-          btn
-            .setButtonText("Create vault")
-            .setCta()
-            .onClick(() => void this.runBusy(btn, "Creating...", () => this.plugin.createVault())),
-        );
+      // Don't assume "no vaultId on this device" means "no vault on this
+      // account" - a device that's never been recovered looks identical
+      // to a genuinely fresh account otherwise, and would happily create
+      // a second, separate, empty vault instead of joining the real one.
+      // Confirmed live: exactly this, on a new phone.
+      const checkingEl = this.containerEl.createEl("p", { text: "Checking for an existing vault on this account…" });
+      void this.plugin.api
+        .listVaults()
+        .then((vaults) => {
+          checkingEl.remove();
+          if (vaults.length > 0) {
+            this.containerEl.createEl("p", {
+              text: `This account already has a vault (${vaults[0]!.id}) - this device just isn't attached to it yet. Use "Recover vault access" below with your recovery code rather than creating a new, separate one.`,
+            });
+            this.renderRecoveryForm();
+            this.containerEl.createEl("h3", { text: "Or create a separate vault" });
+            this.containerEl.createEl("p", { text: "Only do this if you actually want an unrelated, empty vault." });
+          }
+          new Setting(this.containerEl)
+            .setName(vaults.length > 0 ? "Create a new, separate vault" : "No vault yet")
+            .addButton((btn) =>
+              btn
+                .setButtonText("Create vault")
+                .setCta()
+                .onClick(() => void this.runBusy(btn, "Creating...", () => this.plugin.createVault())),
+            );
+        })
+        .catch(async (err) => {
+          checkingEl.remove();
+          if (await this.handleIfSessionExpired(err)) return;
+          new Setting(this.containerEl)
+            .setName("No vault yet")
+            .setDesc(`Could not check for an existing vault: ${err instanceof Error ? err.message : String(err)}`)
+            .addButton((btn) =>
+              btn
+                .setButtonText("Create vault")
+                .setCta()
+                .onClick(() => void this.runBusy(btn, "Creating...", () => this.plugin.createVault())),
+            );
+        });
     } else {
       this.containerEl.createEl("p", { text: `Vault: ${this.plugin.settings.vaultId}` });
       this.syncStatusEl = this.containerEl.createEl("p", { text: "Checking sync status…" });
