@@ -1,3 +1,11 @@
+// A Server URL with a trailing slash (easy to paste in by accident) would
+// otherwise produce a double slash before every path - e.g.
+// "https://host.workers.dev//v1/auth/login" - which the backend's router
+// doesn't match, giving an opaque 404. Confirmed live.
+function stripTrailingSlash(url: string): string {
+  return url.replace(/\/+$/, "");
+}
+
 export class ApiError extends Error {
   constructor(public status: number, public code: string, message: string) {
     super(message);
@@ -61,14 +69,18 @@ export type CommitResult =
 export class SynoraApiClient {
   private accessToken: string | undefined;
 
-  constructor(private baseUrl: string, private transport: Transport = fetchTransport) {}
+  private baseUrl: string;
+
+  constructor(baseUrl: string, private transport: Transport = fetchTransport) {
+    this.baseUrl = stripTrailingSlash(baseUrl);
+  }
 
   setAccessToken(token: string | undefined) {
     this.accessToken = token;
   }
 
   setBaseUrl(baseUrl: string) {
-    this.baseUrl = baseUrl;
+    this.baseUrl = stripTrailingSlash(baseUrl);
   }
 
   private async request<T>(
