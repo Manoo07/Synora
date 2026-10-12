@@ -332,20 +332,36 @@ export default class SynoraPlugin extends Plugin {
     this.api.setAccessToken(login.accessToken);
     await this.saveSettings();
 
-    // If this device already knows which vault it's trying to join (shown
-    // right in the settings tab as "Vault: ..."), use that directly rather
-    // than guessing the first vault on the account - matters once an
-    // account has more than one vault, and is simply more correct even
-    // with just one.
-    let vaultId = this.settings.vaultId;
-    if (!vaultId) {
-      const vaults = await this.api.listVaults();
-      vaultId = vaults[0]?.id;
-    }
-    if (!vaultId) throw new Error("No vault found on this account to recover.");
+    // Don't guess which vault this recovery code is for - a device can
+    // already have a vaultId saved that's wrong for this code (e.g. it
+    // created its own separate vault before ever attempting recovery,
+    // confirmed live). The recovery code itself is the actual proof of
+    // which vault it belongs to: try every vault on the account and keep
+    // whichever one the code actually unwraps. Trying the device's
+    // already-known vault first is just an ordering optimization, not a
+    // trust decision.
+    const vaults = await this.api.listVaults();
+    if (vaults.length === 0) throw new Error("No vault found on this account to recover.");
+    const candidates = this.settings.vaultId
+      ? [this.settings.vaultId, ...vaults.map((v) => v.id).filter((id) => id !== this.settings.vaultId)]
+      : vaults.map((v) => v.id);
 
-    const { wrappedKey } = await this.api.getRecoveryKey(vaultId);
-    const vaultKey = unwrapVaultKey(base64ToBytes(wrappedKey), base64ToBytes(recoveryCodeB64));
+    let vaultId: string | undefined;
+    let vaultKey: Uint8Array | undefined;
+    for (const candidateId of candidates) {
+      try {
+        const { wrappedKey } = await this.api.getRecoveryKey(candidateId);
+        vaultKey = unwrapVaultKey(base64ToBytes(wrappedKey), base64ToBytes(recoveryCodeB64));
+        vaultId = candidateId;
+        break;
+      } catch {
+        // Wrong vault for this code (or it has no recovery key set up at
+        // all) - try the next one rather than failing on the first miss.
+      }
+    }
+    if (!vaultId || !vaultKey) {
+      throw new Error("This recovery code didn't match any vault on this account.");
+    }
 
     const wrappedForSelf = wrapVaultKey(vaultKey, base64ToBytes(devicePublicKeyB64));
     await this.api.selfRecoverDevice(vaultId, bytesToBase64(wrappedForSelf), 1);
