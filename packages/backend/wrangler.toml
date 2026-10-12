@@ -7,15 +7,14 @@ compatibility_flags = ["nodejs_compat"]
 binding = "BUCKET"
 bucket_name = "synora-bucket"
 
-# Local dev reads straight from the docker-compose Postgres instance (see
-# docker-compose.yml). Production should point this at a hosted Postgres
-# instance via the Cloudflare dashboard / `wrangler hyperdrive create`.
+# `id` is the real production Hyperdrive config (points at the hosted
+# Aiven Postgres instance). `localConnectionString` is only used by
+# `wrangler dev`, which still talks to the local docker-compose Postgres
+# instead - see docker-compose.yml.
 [[hyperdrive]]
 binding = "HYPERDRIVE"
-id = "local-dev-placeholder"
+id = "fbf0fa17c44b4a50a0c64a9e1e7f4081"
 localConnectionString = "postgres://synora:synora@localhost:5435/synora"
 
-[vars]
-# Replace before any real deployment. Secrets should be set via
-# `wrangler secret put JWT_SECRET` instead of a plaintext var.
-JWT_SECRET = "dev-only-secret-change-me"
+# JWT_SECRET is set as a real secret (`wrangler secret put JWT_SECRET`),
+# not a [vars] entry - a binding can't be both.
