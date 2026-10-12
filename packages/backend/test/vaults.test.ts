@@ -233,4 +233,98 @@ describe("vaults and device isolation", () => {
     );
     expect(recoverRes.status).toBe(403);
   });
+
+  it("lets a device already active for one vault self-recover into a second vault on the same account", async () => {
+    const bindings = testBindings();
+    const alice = await registerUser(bindings, "alice@example.com");
+
+    // Alice's first device creates TWO vaults (both owned by the same
+    // account), vaultA with a recovery key set up (the helper doesn't,
+    // since most tests don't need one).
+    const vaultARes = await app.request(
+      "/v1/vaults",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${alice.accessToken}` },
+        body: JSON.stringify({ wrappedVaultKey: "wrapped-a-for-device-1", wrappedRecoveryKey: "wrapped-recovery-a" }),
+      },
+      bindings,
+    );
+    const vaultA = (await vaultARes.json()) as { id: string };
+    const vaultBRes = await app.request(
+      "/v1/vaults",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${alice.accessToken}` },
+        body: JSON.stringify({ wrappedVaultKey: "wrapped-b-for-device-1" }),
+      },
+      bindings,
+    );
+    const vaultB = (await vaultBRes.json()) as { id: string };
+
+    // A second device logs in (lands "pending") and gets enrolled into
+    // vaultB ONLY - mirroring a device that's legitimately active
+    // somewhere, but has never touched vaultA.
+    const secondLogin = await app.request(
+      "/v1/auth/login",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: "alice@example.com", password: "password123", devicePublicKey: "second-device-key" }),
+      },
+      bindings,
+    );
+    const secondToken = (await secondLogin.json() as { accessToken: string; deviceId: string });
+    await app.request(
+      `/v1/vaults/${vaultB.id}/devices`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${alice.accessToken}` },
+        body: JSON.stringify({ deviceId: secondToken.deviceId, wrappedVaultKey: "wrapped-b-for-device-2", keyEpoch: 1 }),
+      },
+      bindings,
+    );
+    const reLogin = await app.request(
+      "/v1/auth/login",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: "alice@example.com", password: "password123", devicePublicKey: "second-device-key" }),
+      },
+      bindings,
+    );
+    const secondDeviceToken = (await reLogin.json() as { accessToken: string; deviceStatus: string });
+    expect(secondDeviceToken.deviceStatus).toBe("active");
+
+    // Now the second device tries to self-recover into vaultA using
+    // vaultA's recovery key - it's globally "active" (for vaultB), but
+    // must still be allowed to gain access to vaultA.
+    const recoveryKeyRes = await app.request(
+      `/v1/vaults/${vaultA.id}/recovery-key`,
+      { headers: { authorization: `Bearer ${secondDeviceToken.accessToken}` } },
+      bindings,
+    );
+    expect(recoveryKeyRes.status).toBe(200);
+
+    const recoverRes = await app.request(
+      `/v1/vaults/${vaultA.id}/devices/self-recover`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${secondDeviceToken.accessToken}` },
+        body: JSON.stringify({ wrappedVaultKey: "wrapped-a-for-device-2-recovered", keyEpoch: 1 }),
+      },
+      bindings,
+    );
+    expect(recoverRes.status).toBe(200);
+
+    const keyRes = await app.request(
+      `/v1/vaults/${vaultA.id}/wrapped-key`,
+      { headers: { authorization: `Bearer ${secondDeviceToken.accessToken}` } },
+      bindings,
+    );
+    expect(keyRes.status).toBe(200);
+    expect((await keyRes.json()) as { wrappedKey: string }).toMatchObject({
+      wrappedKey: "wrapped-a-for-device-2-recovered",
+    });
+  });
 });

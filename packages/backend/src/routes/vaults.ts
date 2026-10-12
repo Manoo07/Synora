@@ -190,23 +190,44 @@ vaultRoutes.post("/:vaultId/devices/self-recover", async (c) => {
   const deviceId = c.var.deviceId;
 
   const [device] = await c.env.DB.select().from(devices).where(eq(devices.id, deviceId)).limit(1);
-  // Only a device that has never been activated gets to self-activate
-  // this way. A device someone explicitly revoked staying revoked is the
-  // whole point of revocation - it doesn't get a second chance just by
-  // knowing the recovery key for its old account.
-  if (!device || device.userId !== c.var.userId || device.status !== "pending") {
+  // A device someone explicitly revoked staying revoked is the whole
+  // point of revocation - it doesn't get a second chance just by knowing
+  // the recovery key for its old account. But "active" on its own isn't
+  // disqualifying: an account can end up with more than one vault (e.g.
+  // a device briefly created its own before ever attempting recovery,
+  // confirmed live), and a device already active for a DIFFERENT vault
+  // must still be able to self-recover into this one - global
+  // active/pending status isn't the same thing as "has this vault."
+  if (!device || device.userId !== c.var.userId || device.status === "revoked") {
     throw forbidden("This device is not eligible for self-recovery");
   }
+  const [existingGrant] = await c.env.DB.select()
+    .from(wrappedVaultKeys)
+    .where(
+      and(
+        eq(wrappedVaultKeys.vaultId, vaultId),
+        eq(wrappedVaultKeys.holderType, "device"),
+        eq(wrappedVaultKeys.holderId, deviceId),
+      ),
+    )
+    .limit(1);
+  if (existingGrant) throw forbidden("This device already has access to this vault");
 
   await c.env.DB.transaction(async (tx) => {
     await tx.update(devices).set({ status: "active" }).where(eq(devices.id, deviceId));
-    await tx.insert(wrappedVaultKeys).values({
-      vaultId,
-      holderType: "device",
-      holderId: deviceId,
-      keyEpoch: body.keyEpoch,
-      wrappedKey: body.wrappedVaultKey,
-    });
+    await tx
+      .insert(wrappedVaultKeys)
+      .values({
+        vaultId,
+        holderType: "device",
+        holderId: deviceId,
+        keyEpoch: body.keyEpoch,
+        wrappedKey: body.wrappedVaultKey,
+      })
+      .onConflictDoUpdate({
+        target: [wrappedVaultKeys.vaultId, wrappedVaultKeys.holderType, wrappedVaultKeys.holderId, wrappedVaultKeys.keyEpoch],
+        set: { wrappedKey: body.wrappedVaultKey },
+      });
   });
 
   return c.json({ status: "recovered", deviceId });
