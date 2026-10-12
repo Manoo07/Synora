@@ -49,21 +49,20 @@ export default class SynoraPlugin extends Plugin {
   private suppressor = new WriteSuppressor();
   private pendingDebounces = new Map<string, ReturnType<typeof setTimeout>>();
   private statusBarEl?: HTMLElement;
+  // True specifically when this device is signed in, a vaultId is known,
+  // but the server has no wrapped vault key for THIS device (distinct
+  // from a connectivity failure) - the settings tab uses this to offer
+  // self-recovery inline instead of a generic error. See initEngine().
+  needsVaultKeyRecovery = false;
 
   async onload(): Promise<void> {
     const raw = ((await this.loadData()) as Record<string, unknown>) ?? {};
     this.settings = { ...DEFAULT_SETTINGS, ...(raw.settings as Partial<SynoraSettings>) };
-    const store = new PluginDataStore(this, raw);
 
     this.api = new SynoraApiClient(this.settings.serverUrl, obsidianTransport);
     if (this.settings.accessToken) this.api.setAccessToken(this.settings.accessToken);
 
-    if (this.settings.vaultId && this.settings.deviceSecretKeyB64) {
-      await this.initEngine(store).catch((err) => {
-        console.error("Synora: failed to initialize sync engine", err);
-        new Notice("Synora: could not connect to sync server. Check settings.");
-      });
-    }
+    await this.ensureEngineInitialized();
 
     this.addSettingTab(new SynoraSettingTab(this.app, this));
     this.statusBarEl = this.addStatusBarItem();
@@ -78,12 +77,37 @@ export default class SynoraPlugin extends Plugin {
     );
   }
 
+  // Reusable whenever the engine might need to come up: on load, and
+  // after a sign-in that could follow either a stale 401 (engine was
+  // torn down, token's fresh now) or a device that never got its wrapped
+  // key in the first place. Safe to call when it's already running - it
+  // just redoes the same check.
+  async ensureEngineInitialized(): Promise<void> {
+    if (!this.settings.vaultId || !this.settings.deviceSecretKeyB64) return;
+    const raw = ((await this.loadData()) as Record<string, unknown>) ?? {};
+    const store = new PluginDataStore(this, raw);
+    await this.initEngine(store).catch((err) => {
+      console.error("Synora: failed to initialize sync engine", err);
+      if (err instanceof ApiError && err.status === 403) {
+        // This device is signed in and knows the vaultId, but the server
+        // has never wrapped the vault key for it - either it's a second
+        // device that was never approved/recovered, or (as happened live)
+        // a prior device identity got lost and this is really a fresh one
+        // under the same account.
+        this.needsVaultKeyRecovery = true;
+      } else {
+        new Notice("Synora: could not connect to sync server. Check settings.");
+      }
+    });
+  }
+
   private async initEngine(store: KeyValueStore): Promise<void> {
     const { vaultId, deviceSecretKeyB64 } = this.settings;
     if (!vaultId || !deviceSecretKeyB64) return;
 
     const { wrappedKey } = await this.api.getWrappedKey(vaultId);
     this.vaultKey = unwrapVaultKey(base64ToBytes(wrappedKey), base64ToBytes(deviceSecretKeyB64));
+    this.needsVaultKeyRecovery = false;
 
     this.engine = new SyncEngine({
       api: this.api,
@@ -248,8 +272,14 @@ export default class SynoraPlugin extends Plugin {
   }
 
   async approveDevice(deviceId: string, devicePublicKeyB64: string): Promise<void> {
+    if (deviceId === this.settings.deviceId) {
+      new Notice("This is the current device - it can't approve itself. Use Recover vault access instead.");
+      return;
+    }
     if (!this.settings.vaultId || !this.vaultKey) {
-      new Notice("No vault key available on this device yet.");
+      new Notice(
+        "This device doesn't have the vault key itself, so it can't approve others. Use Recover vault access on this device first.",
+      );
       return;
     }
     const wrapped = wrapVaultKey(this.vaultKey, base64ToBytes(devicePublicKeyB64));
@@ -276,19 +306,28 @@ export default class SynoraPlugin extends Plugin {
     this.api.setAccessToken(login.accessToken);
     await this.saveSettings();
 
-    const vaults = await this.api.listVaults();
-    const vault = vaults[0];
-    if (!vault) throw new Error("No vault found on this account to recover.");
+    // If this device already knows which vault it's trying to join (shown
+    // right in the settings tab as "Vault: ..."), use that directly rather
+    // than guessing the first vault on the account - matters once an
+    // account has more than one vault, and is simply more correct even
+    // with just one.
+    let vaultId = this.settings.vaultId;
+    if (!vaultId) {
+      const vaults = await this.api.listVaults();
+      vaultId = vaults[0]?.id;
+    }
+    if (!vaultId) throw new Error("No vault found on this account to recover.");
 
-    const { wrappedKey } = await this.api.getRecoveryKey(vault.id);
+    const { wrappedKey } = await this.api.getRecoveryKey(vaultId);
     const vaultKey = unwrapVaultKey(base64ToBytes(wrappedKey), base64ToBytes(recoveryCodeB64));
 
     const wrappedForSelf = wrapVaultKey(vaultKey, base64ToBytes(devicePublicKeyB64));
-    await this.api.selfRecoverDevice(vault.id, bytesToBase64(wrappedForSelf), 1);
+    await this.api.selfRecoverDevice(vaultId, bytesToBase64(wrappedForSelf), 1);
 
-    this.settings.vaultId = vault.id;
+    this.settings.vaultId = vaultId;
     await this.saveSettings();
     this.vaultKey = vaultKey;
+    this.needsVaultKeyRecovery = false;
     new Notice("Vault recovered.");
 
     const raw = ((await this.loadData()) as Record<string, unknown>) ?? {};

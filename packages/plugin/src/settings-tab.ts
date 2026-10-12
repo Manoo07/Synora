@@ -56,17 +56,19 @@ export class SynoraSettingTab extends PluginSettingTab {
       }),
     );
 
-    if (this.plugin.settings.accessToken && !this.pendingNotice) {
+    const needsRecovery = this.pendingNotice || this.plugin.needsVaultKeyRecovery;
+    if (this.plugin.settings.accessToken && !needsRecovery) {
       this.renderSignedIn();
     } else {
-      this.renderSignIn();
+      this.renderSignIn(needsRecovery);
     }
   }
 
-  renderSignIn(): void {
-    if (this.pendingNotice) {
+  renderSignIn(needsRecovery = false): void {
+    if (needsRecovery) {
+      const vaultNote = this.plugin.settings.vaultId ? ` for vault ${this.plugin.settings.vaultId}` : "";
       this.containerEl.createEl("p", {
-        text: "Signed in, but this device isn't enrolled in a vault yet. Either approve it from an already-trusted device, or recover vault access below using your recovery code.",
+        text: `This device (${this.plugin.settings.deviceName}) is signed in but doesn't have the vault key${vaultNote} yet. Either approve it from an already-trusted device, or use "Recover vault access" below with your recovery code - it's pre-filled with your email already.`,
       });
     }
 
@@ -101,11 +103,18 @@ export class SynoraSettingTab extends PluginSettingTab {
       text: "No other trusted device around? Use the recovery code shown when the vault was created.",
     });
 
-    new Setting(this.containerEl).setName("Email").addText((text) =>
+    new Setting(this.containerEl).setName("Email").addText((text) => {
+      // Pre-filled when we already know the account email (e.g. this
+      // device just had a session expire, or is mid-recovery) so the only
+      // thing actually left to type is the password and recovery code.
+      if (this.plugin.settings.email) {
+        this.recoveryEmail = this.plugin.settings.email;
+        text.setValue(this.plugin.settings.email);
+      }
       text.onChange((value) => {
         this.recoveryEmail = value;
-      }),
-    );
+      });
+    });
     new Setting(this.containerEl).setName("Password").addText((text) => {
       text.inputEl.type = "password";
       text.onChange((value) => {
@@ -142,6 +151,9 @@ export class SynoraSettingTab extends PluginSettingTab {
 
   renderSignedIn(): void {
     this.containerEl.createEl("p", { text: `Signed in as ${this.plugin.settings.email ?? "unknown"}` });
+    this.containerEl.createEl("p", {
+      text: `This device: ${this.plugin.settings.deviceName} (${this.plugin.settings.deviceId ?? "unknown id"})`,
+    });
 
     if (!this.plugin.settings.vaultId) {
       new Setting(this.containerEl)
@@ -179,10 +191,13 @@ export class SynoraSettingTab extends PluginSettingTab {
     this.pendingListEl.empty();
     try {
       const { pending } = await this.plugin.api.listDevices(this.plugin.settings.vaultId);
-      if (pending.length === 0) {
-        this.pendingListEl.createEl("p", { text: "No devices waiting." });
+      const others = (pending as Array<{ id: string; name: string; publicKey: string }>).filter(
+        (d) => d.id !== this.plugin.settings.deviceId,
+      );
+      if (others.length === 0) {
+        this.pendingListEl.createEl("p", { text: "No other devices waiting." });
       }
-      for (const device of pending as Array<{ id: string; name: string; publicKey: string }>) {
+      for (const device of others) {
         new Setting(this.pendingListEl).setName(device.name).addButton((btn) =>
           btn
             .setButtonText("Approve")
@@ -226,6 +241,10 @@ export class SynoraSettingTab extends PluginSettingTab {
       const status = await this.plugin.signIn(mode, email, this.password);
       this.password = "";
       this.pendingNotice = status === "pending";
+      // A fresh sign-in is exactly when a previously torn-down engine
+      // (e.g. after a 401) needs to come back up - nothing else triggers
+      // that on its own. No-ops harmlessly if it's already running.
+      if (status === "active") await this.plugin.ensureEngineInitialized();
       this.display();
     } catch (err) {
       new Notice(`Sign-in failed: ${err instanceof Error ? err.message : String(err)}`);
