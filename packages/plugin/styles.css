@@ -1,0 +1,42 @@
+.synora-status-bar-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.synora-status-bar-item:hover {
+  color: var(--text-normal);
+}
+
+.synora-status-bar-item .synora-status-icon {
+  display: flex;
+  align-items: center;
+}
+
+.synora-status-bar-item .synora-status-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.synora-status-bar-item.is-error .synora-status-icon {
+  color: var(--text-error);
+}
+
+.synora-status-bar-item.is-synced .synora-status-icon {
+  color: var(--text-success, var(--color-green, inherit));
+}
+
+.synora-status-icon.is-spinning svg {
+  animation: synora-spin 1s linear infinite;
+  transform-origin: center;
+}
+
+@keyframes synora-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}

@@ -2,6 +2,11 @@ import { App, ButtonComponent, Notice, PluginSettingTab, Setting } from "obsidia
 import type SynoraPlugin from "./main.js";
 import { ApiError } from "./api/client.js";
 
+function formatBytes(bytes: number): string {
+  const mb = bytes / (1024 * 1024);
+  return mb >= 1 ? `${mb.toFixed(mb < 10 ? 1 : 0)} MB` : `${Math.round(bytes / 1024)} KB`;
+}
+
 export class SynoraSettingTab extends PluginSettingTab {
   private password = "";
   private recoveryEmail = "";
@@ -285,9 +290,19 @@ export class SynoraSettingTab extends PluginSettingTab {
   private async renderSyncStatus(): Promise<void> {
     if (!this.syncStatusEl) return;
     const pending = await this.plugin.getPendingUploadCount();
-    this.syncStatusEl.setText(
-      pending > 0 ? `⟳ ${pending} file${pending === 1 ? "" : "s"} waiting to upload` : "✓ All files synced",
-    );
+    let text = pending > 0 ? `⟳ ${pending} file${pending === 1 ? "" : "s"} waiting to upload` : "✓ All files synced";
+
+    try {
+      const usage = await this.plugin.api.getUsage();
+      if (usage.plan === "free") {
+        text += ` · ${formatBytes(usage.usedBytes)} of ${formatBytes(usage.limitBytes)} used`;
+      }
+    } catch {
+      // Usage is a nice-to-have on top of the sync status above, which
+      // already rendered - not worth failing the whole status line over.
+    }
+
+    this.syncStatusEl.setText(text);
   }
 
   private pendingListEl?: HTMLElement;

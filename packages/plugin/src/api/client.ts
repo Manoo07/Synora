@@ -227,4 +227,8 @@ export class SynoraApiClient {
       `/v1/vaults/${vaultId}/status`,
     );
   }
+
+  getUsage() {
+    return this.request<{ plan: "free" | "paid"; usedBytes: number; limitBytes: number }>("/v1/account/usage");
+  }
 }

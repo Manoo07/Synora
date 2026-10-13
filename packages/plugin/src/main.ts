@@ -1,4 +1,4 @@
-import { Notice, Plugin, TAbstractFile, TFile } from "obsidian";
+import { Notice, Plugin, TAbstractFile, TFile, setIcon } from "obsidian";
 import { sha256 } from "@noble/hashes/sha256";
 import { ApiError, SynoraApiClient } from "./api/client.js";
 import { obsidianTransport } from "./api/obsidian-transport.js";
@@ -49,6 +49,12 @@ export default class SynoraPlugin extends Plugin {
   private suppressor = new WriteSuppressor();
   private pendingDebounces = new Map<string, ReturnType<typeof setTimeout>>();
   private statusBarEl?: HTMLElement;
+  private statusIconEl?: HTMLElement;
+  private statusTextEl?: HTMLElement;
+  // Guards against two overlapping sync cycles - the automatic interval
+  // and a manual click (or two quick manual clicks) racing against the
+  // same local queue/state store otherwise.
+  private isSyncing = false;
   // True specifically when this device is signed in, a vaultId is known,
   // but the server has no wrapped vault key for THIS device (distinct
   // from a connectivity failure) - the settings tab uses this to offer
@@ -65,7 +71,20 @@ export default class SynoraPlugin extends Plugin {
     await this.ensureEngineInitialized();
 
     this.addSettingTab(new SynoraSettingTab(this.app, this));
+
     this.statusBarEl = this.addStatusBarItem();
+    this.statusBarEl.addClass("synora-status-bar-item");
+    this.statusBarEl.setAttribute("aria-label", "Click to sync now");
+    this.statusIconEl = this.statusBarEl.createSpan({ cls: "synora-status-icon" });
+    this.statusTextEl = this.statusBarEl.createSpan({ text: "Synora" });
+    this.registerDomEvent(this.statusBarEl, "click", () => {
+      if (this.isSyncing) return;
+      if (!this.engine) {
+        new Notice("Synora: not connected. Open settings to sign in and attach a vault.");
+        return;
+      }
+      void this.syncCycle();
+    });
     void this.updateStatusBar("idle");
 
     this.registerEvent(this.app.vault.on("create", (f) => this.onVaultEvent(f, "created")));
@@ -153,7 +172,8 @@ export default class SynoraPlugin extends Plugin {
   }
 
   async syncCycle(): Promise<void> {
-    if (!this.engine) return;
+    if (!this.engine || this.isSyncing) return;
+    this.isSyncing = true;
     try {
       void this.updateStatusBar("syncing");
       await this.engine.flush();
@@ -175,22 +195,46 @@ export default class SynoraPlugin extends Plugin {
         new Notice("Synora: your session expired. Open settings to sign in again.");
         return;
       }
+      // A quota-exceeded commit retries identically forever otherwise,
+      // same as the 401 case above - called out distinctly from the
+      // generic Notice below since "upgrade or free up space" is a very
+      // different next step than "something went wrong."
+      if (err instanceof ApiError && err.code === "quota_exceeded") {
+        new Notice(
+          "Synora: this account's free storage limit is used up. Free up space or ask the server operator to raise your limit.",
+          15_000,
+        );
+        return;
+      }
       // Anything else: this is the only place the actual failure reason
       // is visible at all on a platform with no console access (mobile) -
       // console.error alone is invisible there. Shown for a full 15s
       // since it's often long enough to need copying down by hand.
       new Notice(`Synora sync failed: ${err instanceof Error ? err.message : String(err)}`, 15_000);
+    } finally {
+      this.isSyncing = false;
     }
   }
 
+  // Lucide icon names (bundled with Obsidian - setIcon renders them as
+  // inline SVG, unlike a plain unicode glyph, which depends on the
+  // platform's emoji font and - confirmed live on Android - can render as
+  // a broken/unrelated glyph instead of the intended one).
   private async updateStatusBar(state: "idle" | "syncing" | "error"): Promise<void> {
-    if (!this.statusBarEl) return;
+    if (!this.statusBarEl || !this.statusIconEl || !this.statusTextEl) return;
+    this.statusBarEl.removeClass("is-error", "is-synced");
+    this.statusIconEl.removeClass("is-spinning");
+
     if (state === "syncing") {
-      this.statusBarEl.setText("Synora ⟳");
+      setIcon(this.statusIconEl, "refresh-cw");
+      this.statusIconEl.addClass("is-spinning");
+      this.statusTextEl.setText("Syncing…");
       return;
     }
     if (state === "error") {
-      this.statusBarEl.setText("Synora ⚠");
+      setIcon(this.statusIconEl, "alert-triangle");
+      this.statusBarEl.addClass("is-error");
+      this.statusTextEl.setText("Sync error");
       return;
     }
     // "idle" on its own doesn't say whether there's still unsent work -
@@ -199,7 +243,14 @@ export default class SynoraPlugin extends Plugin {
     // up," which flush()/pull() finishing doesn't guarantee on its own
     // (a flush can leave a just-re-queued conflict copy behind, say).
     const pending = (await this.engine?.pendingUploadCount()) ?? 0;
-    this.statusBarEl.setText(pending > 0 ? `Synora ⟳ ${pending} pending` : "Synora ✓ Synced");
+    if (pending > 0) {
+      setIcon(this.statusIconEl, "upload-cloud");
+      this.statusTextEl.setText(`${pending} pending`);
+    } else {
+      setIcon(this.statusIconEl, "check-circle-2");
+      this.statusBarEl.addClass("is-synced");
+      this.statusTextEl.setText("Synced");
+    }
   }
 
   async saveSettings(): Promise<void> {
