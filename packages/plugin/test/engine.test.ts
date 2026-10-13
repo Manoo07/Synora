@@ -17,16 +17,17 @@ function buildEngine() {
   const api = new SynoraApiClient("http://fake");
   const vault = new MemoryVault();
   const store = new InMemoryKeyValueStore();
+  const queue = new SyncQueue(store);
   const engine = new SyncEngine({
     api,
     vaultId: VAULT_ID,
     vaultKey,
     vault,
-    queue: new SyncQueue(store),
+    queue,
     state: new LocalStateStore(store),
     suppressor: new WriteSuppressor(),
   });
-  return { engine, vault, api, vaultKey };
+  return { engine, vault, api, vaultKey, queue };
 }
 
 describe("SyncEngine", () => {
@@ -286,5 +287,34 @@ describe("SyncEngine", () => {
     expect(new TextDecoder().decode(await b.vault.read("Notes/new-name.md"))).toBe("hello");
     // The whole point: no leftover duplicate at the old path on B.
     expect(b.vault.files.has("Notes/old-name.md")).toBe(false);
+  });
+
+  it("coalesces multiple unflushed edits to the same file instead of spuriously conflicting with itself", async () => {
+    const { engine, vault, api, queue } = buildEngine();
+
+    await engine.handleLocalChange("note.md", "created", new TextEncoder().encode("v1"));
+    await engine.flush(); // establishes a real committed base version
+
+    // Three edits in a row with nothing flushed in between - exactly what
+    // happens just by pausing between paragraphs while composing one
+    // document (the sync interval defaults to 30s). Before the fix, each
+    // of these queued a separate op, all sharing the same now-stale
+    // baseVersionId.
+    await engine.handleLocalChange("note.md", "updated", new TextEncoder().encode("v2"));
+    await engine.handleLocalChange("note.md", "updated", new TextEncoder().encode("v3"));
+    await engine.handleLocalChange("note.md", "updated", new TextEncoder().encode("v4"));
+
+    expect(await queue.list()).toHaveLength(1);
+
+    await engine.flush();
+
+    // Fully committed, nothing left pending, and never a real conflict -
+    // one device, one file, edited in sequence. (handleLocalChange never
+    // writes to the vault itself for local edits - that's Obsidian's job
+    // - so this checks the engine's own view: the queue and the server.)
+    expect(await queue.list()).toHaveLength(0);
+    expect([...vault.files.keys()].some((p) => p.includes("conflict"))).toBe(false);
+    const changes = await api.getChanges(VAULT_ID, 0, 500);
+    expect(changes.changes).toHaveLength(2);
   });
 });

@@ -106,7 +106,25 @@ export class SyncEngine {
       sizeBytes: encoded.byteLength,
       enqueuedAt: Date.now(),
     };
-    await queue.enqueue(op);
+    // If this path already has an unflushed op queued, replace it in
+    // place instead of adding a second one. Without this, editing the
+    // same document more than once before a sync cycle runs (easily
+    // done just by pausing between paragraphs - the sync interval
+    // defaults to 30s) queues multiple ops that all carry the *same*
+    // baseVersionId, since nothing has actually committed yet to advance
+    // it. flush() then commits the first one fine, but every op after it
+    // in the queue is now stale relative to that very own commit - the
+    // server correctly rejects it as a conflict, and if the overlapping
+    // edits touch the same lines (likely, composing one document), the
+    // merge isn't clean and it's filed as a conflict copy. Confirmed
+    // live: several conflict copies of one document, edited on a single
+    // device, no other device involved at all.
+    const existingPending = (await queue.list()).find((pending) => pending.logicalPath === path);
+    if (existingPending) {
+      await queue.replace(existingPending.idempotencyKey, op);
+    } else {
+      await queue.enqueue(op);
+    }
     // Optimistically record the content hash now so a rapid second edit to
     // the same path before this op uploads is recognized as a real change
     // (its hash will differ) rather than compared against stale state.
