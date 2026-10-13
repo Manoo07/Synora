@@ -388,6 +388,10 @@ export class SynoraSettingTab extends PluginSettingTab {
       const pendingListEl = this.containerEl.createDiv();
       pendingListEl.createEl("p", { text: "Loading…", cls: "synora-muted" });
       void this.renderPendingDevices(pendingListEl, myGeneration);
+
+      const primaryDeviceEl = this.containerEl.createDiv();
+      primaryDeviceEl.createEl("p", { text: "Checking primary device…", cls: "synora-muted" });
+      void this.renderPrimaryDevice(primaryDeviceEl, myGeneration);
     }
   }
 
@@ -454,6 +458,49 @@ export class SynoraSettingTab extends PluginSettingTab {
       if (generation !== this.renderGeneration) return;
       target.createEl("p", {
         text: `Could not load pending devices: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
+  }
+
+  // The vault's primary device is the source of truth for shared
+  // preferences (theme, community plugins, settings, hotkeys) - see
+  // main.ts pushPreferences()/applyPreferencesFromPrimary(). Any device
+  // can claim it for itself; only whichever one currently holds it can
+  // push.
+  private async renderPrimaryDevice(target: HTMLElement, generation: number): Promise<void> {
+    if (!this.plugin.settings.vaultId) return;
+    target.empty();
+    try {
+      const primary = await this.plugin.api.getPrimaryDevice(this.plugin.settings.vaultId);
+      if (generation !== this.renderGeneration) return;
+      const isPrimary = primary?.deviceId === this.plugin.settings.deviceId;
+
+      new Setting(target)
+        .setName("Primary device")
+        .setDesc(
+          isPrimary
+            ? "This device - it's the source of truth for this vault's shared preferences."
+            : `${primary?.deviceName ?? "Not set"} - that device's preferences can be applied here, or this device can take over as primary.`,
+        )
+        .addButton((btn) => {
+          if (isPrimary) {
+            btn.setButtonText("Push my preferences now").onClick(() =>
+              void this.runBusy(btn, "Pushing...", () => this.plugin.pushPreferences()),
+            );
+          } else {
+            btn.setButtonText("Make this device primary").onClick(() =>
+              void this.runBusy(btn, "Claiming...", async () => {
+                await this.plugin.api.setPrimaryDevice(this.plugin.settings.vaultId!);
+                await this.renderPrimaryDevice(target, generation);
+              }),
+            );
+          }
+        });
+    } catch (err) {
+      if (await this.handleIfSessionExpired(err)) return;
+      if (generation !== this.renderGeneration) return;
+      target.createEl("p", {
+        text: `Could not load primary device: ${err instanceof Error ? err.message : String(err)}`,
       });
     }
   }

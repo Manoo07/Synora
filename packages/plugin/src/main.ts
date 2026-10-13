@@ -13,6 +13,9 @@ import { ICON_PACKS } from "./icon-packs.js";
 import { setupAutoCollapseChildren } from "./auto-collapse.js";
 import { SynoraSettingTab } from "./settings-tab.js";
 import { RecoveryCodeModal } from "./recovery-modal.js";
+import { ConfirmPreferencesModal } from "./confirm-preferences-modal.js";
+import { collectPreferencesBundle, applyPreferencesBundle } from "./preferences-bundle.js";
+import { encryptEnvelope, decryptEnvelope, encodeEnvelope, decodeEnvelope } from "./crypto/envelope.js";
 import {
   generateDeviceKeyPair,
   generateVaultKey,
@@ -561,6 +564,68 @@ export default class SynoraPlugin extends Plugin {
     void this.syncCycle();
   }
 
+  // Reads this device's own current .obsidian/ preferences (minus its
+  // own secret-key-holding folder - see preferences-bundle.ts), encrypts
+  // them, and pushes the result as this vault's shared bundle. Only
+  // meaningful if this device is actually the vault's primary - the
+  // server enforces that itself (403 otherwise), this doesn't
+  // pre-check, since the settings-tab button is already only shown when
+  // this device holds primary.
+  async pushPreferences(): Promise<void> {
+    if (!this.settings.vaultId || !this.vaultKey) throw new Error("Not connected to a vault.");
+    const bundle = await collectPreferencesBundle(this);
+    const plaintext = new TextEncoder().encode(JSON.stringify(bundle));
+    const envelope = encryptEnvelope(this.vaultKey, this.settings.vaultId, this.settings.vaultId, "preferences-bundle", plaintext);
+    const encoded = encodeEnvelope(envelope);
+    await this.api.uploadPreferences(this.settings.vaultId, encoded);
+    new Notice("Synora: preferences pushed for this vault.");
+  }
+
+  // Downloads and applies the vault's shared preferences bundle onto
+  // this device - overwrites this device's current .obsidian/ files
+  // (minus the same hard-excluded own-plugin-folder). See
+  // confirm-preferences-modal.ts for the explicit opt-in this is only
+  // ever called from.
+  async applyPreferencesFromPrimary(): Promise<void> {
+    if (!this.settings.vaultId || !this.vaultKey) throw new Error("Not connected to a vault.");
+    const encoded = await this.api.downloadPreferences(this.settings.vaultId);
+    if (!encoded) {
+      new Notice("Synora: no preferences have been shared for this vault.");
+      return;
+    }
+    const plaintext = decryptEnvelope(this.vaultKey, decodeEnvelope(encoded));
+    const bundle = JSON.parse(new TextDecoder().decode(plaintext)) as Record<string, string>;
+    await applyPreferencesBundle(this, bundle);
+    // Obsidian only scans .obsidian/plugins/ at startup - there's no
+    // reliable public API to force it to re-scan, so this is an honest
+    // limitation to surface rather than silently paper over.
+    new Notice(
+      "Synora: preferences applied. Restart Obsidian (or reload this vault) for any newly-added plugins to load.",
+      15_000,
+    );
+  }
+
+  // Shown right after a device attaches to or recovers a vault that
+  // already has a primary device's preferences shared - nothing applies
+  // automatically, this is the explicit opt-in the feature is built
+  // around. Failures here are non-fatal to the attach/recover flow
+  // itself, which has already succeeded by this point.
+  private async maybeOfferPreferencesSync(): Promise<void> {
+    if (!this.settings.vaultId) return;
+    try {
+      const info = await this.api.getPreferencesInfo(this.settings.vaultId);
+      if (!info.exists) return;
+    } catch (err) {
+      console.error("Synora: could not check for shared preferences", err);
+      return;
+    }
+    new ConfirmPreferencesModal(this.app, () => {
+      void this.applyPreferencesFromPrimary().catch((err) => {
+        new Notice(`Synora: could not apply preferences - ${err instanceof Error ? err.message : String(err)}`, 15_000);
+      });
+    }).open();
+  }
+
   // Detaches this device from whatever vault it's currently pointed at -
   // purely local: nothing is deleted server-side, and the device's
   // account sign-in and key pair are untouched. For when a device ended
@@ -617,6 +682,7 @@ export default class SynoraPlugin extends Plugin {
     const pulled = await this.engine?.pull();
     new Notice("Files pulled.");
     if (pulled) this.notifySkipped(pulled.skipped);
+    void this.maybeOfferPreferencesSync();
   }
 
   async approveDevice(deviceId: string, devicePublicKeyB64: string): Promise<void> {
@@ -716,5 +782,6 @@ export default class SynoraPlugin extends Plugin {
     const pulled = await this.engine?.pull();
     new Notice("Files pulled.");
     if (pulled) this.notifySkipped(pulled.skipped);
+    void this.maybeOfferPreferencesSync();
   }
 }

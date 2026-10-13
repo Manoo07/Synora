@@ -237,4 +237,40 @@ export class SynoraApiClient {
       deviceLimit: number;
     }>("/v1/account/usage");
   }
+
+  setPrimaryDevice(vaultId: string) {
+    return this.request<{ status: string; deviceId: string }>(`/v1/vaults/${vaultId}/primary-device`, {
+      method: "PUT",
+    });
+  }
+
+  getPrimaryDevice(vaultId: string) {
+    return this.request<{ deviceId: string; deviceName: string } | null>(`/v1/vaults/${vaultId}/primary-device`);
+  }
+
+  getPreferencesInfo(vaultId: string) {
+    return this.request<{ exists: boolean; updatedAt?: string; sizeBytes?: number }>(
+      `/v1/vaults/${vaultId}/preferences/info`,
+    );
+  }
+
+  uploadPreferences(vaultId: string, bytes: Uint8Array) {
+    return this.request<{ status: string; sizeBytes: number }>(`/v1/vaults/${vaultId}/preferences`, {
+      method: "PUT",
+      raw: bytes,
+    });
+  }
+
+  // 404 (nothing shared yet) is an expected, meaningful response here -
+  // callers check getPreferencesInfo first, but this stays safe to call
+  // directly too rather than throwing on the common "not set up yet" case.
+  async downloadPreferences(vaultId: string): Promise<Uint8Array | undefined> {
+    const headers: Record<string, string> = {};
+    if (this.accessToken) headers.authorization = `Bearer ${this.accessToken}`;
+    const res = await this.transport(`${this.baseUrl}/v1/vaults/${vaultId}/preferences`, { method: "GET", headers });
+    if (res.status === 404) return undefined;
+    const ok = res.status >= 200 && res.status < 300;
+    if (!ok) throw new ApiError(res.status, "download_failed", `HTTP ${res.status}`);
+    return new Uint8Array(await res.arrayBuffer());
+  }
 }
