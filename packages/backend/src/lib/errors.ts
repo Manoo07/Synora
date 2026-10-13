@@ -9,5 +9,4 @@ export const forbidden = (message = "Forbidden") => new HttpError(403, "forbidde
 export const notFound = (message = "Not found") => new HttpError(404, "not_found", message);
 export const conflict = (message: string) => new HttpError(409, "conflict", message);
 export const badRequest = (message: string) => new HttpError(400, "bad_request", message);
-export const tooManyRequests = (message = "Too many requests") => new HttpError(429, "rate_limited", message);
 export const payloadTooLarge = (message = "Payload too large") => new HttpError(413, "payload_too_large", message);

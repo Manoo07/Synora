@@ -3,7 +3,6 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import * as schema from "../src/db/schema.js";
 import type { Db } from "../src/db/client.js";
 import { MemoryBucket } from "./fakes/memory-bucket.js";
-import { MemoryRateLimiter } from "./fakes/memory-rate-limiter.js";
 import type { AppBindings } from "../src/context.js";
 
 const CONNECTION_STRING = process.env.DATABASE_URL ?? "postgres://synora:synora@localhost:5435/synora";
@@ -34,8 +33,6 @@ export function testBindings(overrides: Partial<AppBindings> = {}): AppBindings 
     DB: testDb(),
     BUCKET: new MemoryBucket(),
     JWT_SECRET: "test-secret",
-    RATE_LIMIT_REGISTER: new MemoryRateLimiter(10),
-    RATE_LIMIT_LOGIN: new MemoryRateLimiter(20),
     ...overrides,
   };
 }

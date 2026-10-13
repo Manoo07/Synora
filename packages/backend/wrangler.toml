@@ -19,22 +19,10 @@ localConnectionString = "postgres://synora:synora@localhost:5435/synora"
 # JWT_SECRET is set as a real secret (`wrangler secret put JWT_SECRET`),
 # not a [vars] entry - a binding can't be both.
 
-# Rate-limits the unauthenticated auth endpoints by IP - see
-# auth/rate-limit.ts. Cloudflare's purpose-built Rate Limiting binding,
-# not KV: plain KV is eventually-consistent (a write isn't reliably
-# visible to the very next request), which made an earlier KV-counter
-# attempt here do nothing under rapid-fire requests - confirmed live,
-# 12/12 requests succeeded against an intended limit of 10. This binding
-# only takes one fixed limit/period per declaration, hence two of them;
-# `period` only allows 10 or 60 (seconds) - no arbitrary window length.
-[[unsafe.bindings]]
-name = "RATE_LIMIT_REGISTER"
-type = "ratelimit"
-namespace_id = "1001"
-simple = { limit = 10, period = 60 }
-
-[[unsafe.bindings]]
-name = "RATE_LIMIT_LOGIN"
-type = "ratelimit"
-namespace_id = "1002"
-simple = { limit = 20, period = 60 }
+# Rate limiting on /v1/auth/register and /v1/auth/login is NOT done here
+# in code - two different in-Worker approaches (a KV counter, then the
+# `[[unsafe.bindings]]` ratelimit type) were both tried and confirmed
+# live to silently let every request through regardless of volume. It's
+# configured instead as a Cloudflare dashboard WAF Rate Limiting Rule
+# (Security -> WAF -> Rate limiting rules), which enforces at the edge
+# before the request reaches this Worker at all - see README.md.

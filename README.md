@@ -135,3 +135,21 @@ device use "Recover vault access" with that same code to join it.
 - **Not built yet**: the official Community Plugin directory listing, a
   private web workspace, and web-based editing (these are later-phase
   ideas from the original design, not in progress).
+
+## Known limitations
+
+- **No rate limiting on `/v1/auth/register` or `/v1/auth/login`.** Two
+  in-Worker approaches (a KV counter, then Cloudflare's native Rate
+  Limiting binding) were tried and both confirmed live to not actually
+  enforce anything under rapid-fire requests. The reliable fix - a
+  dashboard WAF Rate Limiting Rule, or a Durable Object-backed counter -
+  needs either a custom domain routed through Cloudflare's zone-level WAF
+  or the Workers Paid plan (Durable Objects aren't available on the free
+  plan). Deliberately left unfixed for now: the backend URL isn't public,
+  and the bigger cost risk (unbounded upload size) is already capped at
+  100MB/request in `routes/sync.ts`.
+- **Uploads are authenticated but otherwise uncapped in count** - a
+  compromised or malicious account could still upload many files within
+  the 100MB-each limit. Not a concern at the current single-account
+  scale; would need a per-account storage quota before onboarding anyone
+  else.

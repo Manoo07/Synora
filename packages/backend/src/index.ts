@@ -37,8 +37,6 @@ interface WorkerBindings {
   HYPERDRIVE: { connectionString: string };
   BUCKET: AppBindings["BUCKET"];
   JWT_SECRET: string;
-  RATE_LIMIT_REGISTER: AppBindings["RATE_LIMIT_REGISTER"];
-  RATE_LIMIT_LOGIN: AppBindings["RATE_LIMIT_LOGIN"];
 }
 
 export default {
@@ -48,8 +46,6 @@ export default {
       DB: db,
       BUCKET: env.BUCKET,
       JWT_SECRET: env.JWT_SECRET,
-      RATE_LIMIT_REGISTER: env.RATE_LIMIT_REGISTER,
-      RATE_LIMIT_LOGIN: env.RATE_LIMIT_LOGIN,
     };
     try {
       return await app.fetch(request, bindings, ctx);

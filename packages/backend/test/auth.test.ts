@@ -70,31 +70,6 @@ describe("auth", () => {
     expect(body.accessToken).toBeTruthy();
   });
 
-  it("rate-limits repeated registration attempts from the same caller", async () => {
-    const bindings = testBindings();
-    const attempt = (n: number) =>
-      app.request(
-        "/v1/auth/register",
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ email: `flood-${n}@example.com`, password: "password123", devicePublicKey: `pk-${n}` }),
-        },
-        bindings,
-      );
-
-    const results = [];
-    for (let i = 0; i < 11; i++) results.push(await attempt(i));
-    const statuses = results.map((r) => r.status);
-
-    // The limit is 10 per window - the 11th distinct attempt should be
-    // throttled even though each one would otherwise succeed (different
-    // email each time), confirming this limits raw request volume, not
-    // just failed/duplicate attempts.
-    expect(statuses.filter((s) => s === 201)).toHaveLength(10);
-    expect(statuses.at(-1)).toBe(429);
-  });
-
   it("rejects a wrong password", async () => {
     const bindings = testBindings();
     await registerUser(bindings, "alice@example.com");

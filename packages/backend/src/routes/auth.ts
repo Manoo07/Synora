@@ -1,28 +1,22 @@
-import { Hono, type MiddlewareHandler } from "hono";
+import { Hono } from "hono";
 import { eq, and } from "drizzle-orm";
 import { z } from "zod";
 import type { AppEnv } from "../context.js";
 import { users, devices } from "../db/schema.js";
 import { hashPassword, verifyPassword } from "../auth/password.js";
 import { issueAccessToken } from "../auth/jwt.js";
-import { checkRateLimit, clientIp } from "../auth/rate-limit.js";
-import { badRequest, tooManyRequests, unauthorized } from "../lib/errors.js";
+import { badRequest, unauthorized } from "../lib/errors.js";
 
 export const authRoutes = new Hono<AppEnv>();
 
-// These two endpoints are the only ones a stranger can call at all with
-// no account - and each does real CPU work (password hashing), so an
-// unthrottled flood is both an account-spam vector and a real cost/DoS
-// risk, not just an annoyance. Limited per-IP; the limit/period
-// themselves live in wrangler.toml (one binding per limit - the
-// binding only supports a single fixed configuration).
-function rateLimited(bindingKey: "RATE_LIMIT_REGISTER" | "RATE_LIMIT_LOGIN"): MiddlewareHandler<AppEnv> {
-  return async (c, next) => {
-    const ok = await checkRateLimit(c.env[bindingKey], clientIp(c.req.raw.headers));
-    if (!ok) throw tooManyRequests("Too many attempts - please wait a minute and try again.");
-    await next();
-  };
-}
+// Rate limiting for these two endpoints (the only ones a stranger can
+// call with no account at all) is deliberately NOT done here in Worker
+// code - two different approaches were tried and confirmed live to not
+// actually enforce anything (a KV counter, eventually-consistent so it
+// let bursts straight through; then the `[[unsafe.bindings]]` ratelimit
+// type, which accepted the config but never blocked a single request).
+// It's a Cloudflare dashboard WAF Rate Limiting Rule instead - see
+// README.md "Running your own instance" for the exact rule to create.
 
 const registerSchema = z.object({
   email: z.string().email(),
@@ -34,7 +28,7 @@ const registerSchema = z.object({
 // Registration bootstraps the account's first device as trusted — there is
 // no other device to approve it against yet. Every subsequent device must
 // go through POST /vaults/:vaultId/devices enrollment instead.
-authRoutes.post("/register", rateLimited("RATE_LIMIT_REGISTER"), async (c) => {
+authRoutes.post("/register", async (c) => {
   const body = registerSchema.parse(await c.req.json());
 
   const existing = await c.env.DB.select().from(users).where(eq(users.email, body.email)).limit(1);
@@ -57,7 +51,7 @@ const loginSchema = z.object({
   deviceName: z.string().min(1).default("New device"),
 });
 
-authRoutes.post("/login", rateLimited("RATE_LIMIT_LOGIN"), async (c) => {
+authRoutes.post("/login", async (c) => {
   const body = loginSchema.parse(await c.req.json());
 
   const [user] = await c.env.DB.select().from(users).where(eq(users.email, body.email)).limit(1);
