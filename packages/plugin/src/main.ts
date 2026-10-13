@@ -10,6 +10,7 @@ import type { KeyValueStore } from "./sync/storage.js";
 import { ObsidianVaultAdapter } from "./vault-adapter.js";
 import { DEFAULT_SETTINGS, type SynoraSettings } from "./settings.js";
 import { ICON_PACKS } from "./icon-packs.js";
+import { setupAutoCollapseChildren } from "./auto-collapse.js";
 import { SynoraSettingTab } from "./settings-tab.js";
 import { RecoveryCodeModal } from "./recovery-modal.js";
 import {
@@ -116,6 +117,11 @@ export default class SynoraPlugin extends Plugin {
     );
 
     this.applyIconPack();
+
+    // Opt-in, relies on Obsidian's internal (undocumented) file-explorer
+    // API - see auto-collapse.ts. Only read at load time; toggling the
+    // setting takes effect on the next plugin reload/Obsidian restart.
+    if (this.settings.autoCollapseChildren) setupAutoCollapseChildren(this);
   }
 
   // Purely cosmetic: toggles a body class that gates the CSS-only icon

@@ -103,6 +103,20 @@ export class SynoraSettingTab extends PluginSettingTab {
         });
       });
 
+    new Setting(this.containerEl)
+      .setName("Auto-collapse child folders")
+      .setDesc(
+        "Collapsing a folder also collapses everything inside it, so expanding it again always starts from the " +
+          "same clean state. Relies on an internal Obsidian API, not an officially supported one - takes effect " +
+          "on the next reload of Synora (or Obsidian restart), not immediately.",
+      )
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.autoCollapseChildren ?? false).onChange(async (value) => {
+          this.plugin.settings.autoCollapseChildren = value;
+          await this.plugin.saveSettings();
+        }),
+      );
+
     this.containerEl.createEl("h2", { text: "Attachments" });
 
     new Setting(this.containerEl)

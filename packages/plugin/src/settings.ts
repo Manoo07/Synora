@@ -21,6 +21,13 @@ export interface SynoraSettings {
   syncPaused?: boolean;
   pausedPaths?: string[];
 
+  // Opt-in (undefined/false = off, no change from Obsidian's default
+  // behavior) - relies on Obsidian's internal, undocumented file-explorer
+  // API (see auto-collapse.ts), unlike the rest of this plugin's
+  // settings, so it's off by default and only takes effect from the
+  // next plugin load/Obsidian restart, not live.
+  autoCollapseChildren?: boolean;
+
   // Populated once signed in. The device secret key never leaves this
   // device by design; it lives here because Obsidian's plugin data file
   // is the only durable local storage available to a plugin. The vault
