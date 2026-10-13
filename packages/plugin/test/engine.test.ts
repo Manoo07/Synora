@@ -245,4 +245,46 @@ describe("SyncEngine", () => {
     const changes = await b.api.getChanges(VAULT_ID, 0, 500);
     expect(changes.changes.at(-1)?.operation).toBe("updated");
   });
+
+  it("syncs a rename without duplicating the file at its old path on another device", async () => {
+    const vaultKey = generateVaultKey();
+    const makeDeviceEngine = () => {
+      const api = new SynoraApiClient("http://fake");
+      const vault = new MemoryVault();
+      const store = new InMemoryKeyValueStore();
+      return {
+        engine: new SyncEngine({
+          api,
+          vaultId: VAULT_ID,
+          vaultKey,
+          vault,
+          queue: new SyncQueue(store),
+          state: new LocalStateStore(store),
+          suppressor: new WriteSuppressor(),
+        }),
+        vault,
+      };
+    };
+
+    const a = makeDeviceEngine();
+    const b = makeDeviceEngine();
+
+    await a.engine.handleLocalChange("Notes/old-name.md", "created", new TextEncoder().encode("hello"));
+    await a.engine.flush();
+    await b.engine.pull();
+    expect(new TextDecoder().decode(await b.vault.read("Notes/old-name.md"))).toBe("hello");
+
+    // Device A renames/moves the file - same fileId, same content, new path.
+    await a.engine.handleLocalRename(
+      "Notes/old-name.md",
+      "Notes/new-name.md",
+      new TextEncoder().encode("hello"),
+    );
+    await a.engine.flush();
+    await b.engine.pull();
+
+    expect(new TextDecoder().decode(await b.vault.read("Notes/new-name.md"))).toBe("hello");
+    // The whole point: no leftover duplicate at the old path on B.
+    expect(b.vault.files.has("Notes/old-name.md")).toBe(false);
+  });
 });

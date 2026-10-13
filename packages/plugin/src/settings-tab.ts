@@ -83,6 +83,30 @@ export class SynoraSettingTab extends PluginSettingTab {
           }),
       );
 
+    new Setting(this.containerEl)
+      .setName("Attachments folder")
+      .setDesc(
+        "Set a folder, then use \"Move images now\" to relocate every image in the vault there. " +
+          "Notes referencing them are updated automatically (Obsidian's own rename behavior) - this is a one-time move, not an ongoing router.",
+      )
+      .addText((text) =>
+        text
+          .setPlaceholder("e.g. Attachments")
+          .setValue(this.plugin.settings.attachmentFolder ?? "")
+          .onChange(async (value) => {
+            this.plugin.settings.attachmentFolder = value;
+            await this.plugin.saveSettings();
+          }),
+      )
+      .addButton((btn) =>
+        btn.setButtonText("Move images now").onClick(() =>
+          void this.runBusy(btn, "Moving...", async () => {
+            const { moved, skipped } = await this.plugin.moveImagesToConfiguredFolder();
+            new Notice(`Synora: moved ${moved} image${moved === 1 ? "" : "s"} (${skipped} already there or skipped).`);
+          }),
+        ),
+      );
+
     const needsRecovery = this.pendingNotice || this.plugin.needsVaultKeyRecovery;
     if (this.plugin.settings.accessToken && !needsRecovery) {
       this.renderSignedIn();

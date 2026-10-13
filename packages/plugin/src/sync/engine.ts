@@ -60,6 +60,21 @@ export class SyncEngine {
 
   // --- Outgoing: local vault event -> encrypted, durably queued op -------
 
+  // A pure rename/move: content is unchanged, only the path differs.
+  // state.rename() carries the existing fileId/currentVersionId forward
+  // to the new path key *before* handleLocalChange runs, so its own
+  // state.getByPath(newPath) lookup finds that record and picks up the
+  // right fileId/baseVersionId automatically. Using "renamed" (not
+  // "updated") matters: handleLocalChange's no-op guard would otherwise
+  // skip the enqueue entirely, since content and its hash are identical -
+  // the one thing that actually changed (the path) isn't part of that
+  // check.
+  async handleLocalRename(oldPath: string, newPath: string, content: Uint8Array): Promise<void> {
+    const existing = await this.deps.state.getByPath(oldPath);
+    if (existing) await this.deps.state.rename(oldPath, newPath);
+    await this.handleLocalChange(newPath, "renamed", content);
+  }
+
   async handleLocalChange(
     path: string,
     operation: "created" | "updated" | "renamed" | "deleted",
@@ -283,6 +298,19 @@ export class SyncEngine {
             const envelopeBytes = await api.getObject(vaultId, change.blobKey);
             const manifest = decodeManifest(decryptEnvelope(vaultKey, decodeEnvelope(envelopeBytes)));
             const hash = toHex(sha256(manifest.content));
+
+            // The file moved (renamed, or bulk-relocated) since this
+            // device last saw it - clean up its stale copy at the old
+            // path rather than ending up with it duplicated at both.
+            // Keyed on comparing paths, not the operation label, so it's
+            // correct whether the change was sent as "renamed" or
+            // "updated".
+            const previous = await state.findByFileId(change.fileId);
+            if (previous && previous.logicalPath !== manifest.logicalPath) {
+              await vault.delete(previous.logicalPath);
+              await state.remove(previous.logicalPath);
+            }
+
             suppressor.markApplied(manifest.logicalPath, hash);
             await vault.write(manifest.logicalPath, manifest.content);
             await state.upsert({

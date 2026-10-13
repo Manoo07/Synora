@@ -39,6 +39,7 @@ class PluginDataStore implements KeyValueStore {
 
 const DEBOUNCE_MS = 1500;
 const IGNORED_PREFIXES = [".obsidian/"];
+const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "svg", "webp", "bmp"];
 
 export default class SynoraPlugin extends Plugin {
   settings: SynoraSettings = DEFAULT_SETTINGS;
@@ -90,6 +91,7 @@ export default class SynoraPlugin extends Plugin {
     this.registerEvent(this.app.vault.on("create", (f) => this.onVaultEvent(f, "created")));
     this.registerEvent(this.app.vault.on("modify", (f) => this.onVaultEvent(f, "updated")));
     this.registerEvent(this.app.vault.on("delete", (f) => this.onVaultEvent(f, "deleted")));
+    this.registerEvent(this.app.vault.on("rename", (f, oldPath) => this.onVaultRename(f, oldPath)));
 
     this.registerInterval(
       window.setInterval(() => void this.syncCycle(), this.settings.syncIntervalSeconds * 1000),
@@ -179,6 +181,43 @@ export default class SynoraPlugin extends Plugin {
     if (this.suppressor.shouldSuppress(file.path, hash)) return;
 
     await this.engine.handleLocalChange(file.path, operation, content);
+  }
+
+  // Obsidian's rename event has a different shape ((file, oldPath)) than
+  // create/modify/delete's single-arg callback, so it needs its own
+  // debounced handler rather than reusing onVaultEvent/handleDebounced.
+  private onVaultRename(file: TAbstractFile, oldPath: string): void {
+    if (IGNORED_PREFIXES.some((p) => file.path.startsWith(p) || oldPath.startsWith(p))) return;
+    if (!(file instanceof TFile)) return; // folders: contained files get their own rename events
+
+    // An earlier modify/create event on this same file could still have a
+    // debounce pending under its old path - left alone, it would later
+    // try to re-read a path that no longer exists.
+    const stale = this.pendingDebounces.get(oldPath);
+    if (stale) {
+      clearTimeout(stale);
+      this.pendingDebounces.delete(oldPath);
+    }
+
+    const existing = this.pendingDebounces.get(file.path);
+    if (existing) clearTimeout(existing);
+    this.pendingDebounces.set(
+      file.path,
+      setTimeout(() => void this.handleDebouncedRename(file, oldPath), DEBOUNCE_MS),
+    );
+  }
+
+  private async handleDebouncedRename(file: TFile, oldPath: string): Promise<void> {
+    this.pendingDebounces.delete(file.path);
+    if (!this.engine) return;
+
+    const current = this.app.vault.getAbstractFileByPath(file.path);
+    if (!(current instanceof TFile)) return;
+    const content = new Uint8Array(await this.app.vault.readBinary(current));
+    const hash = toHex(sha256(content));
+    if (this.suppressor.shouldSuppress(file.path, hash)) return;
+
+    await this.engine.handleLocalRename(oldPath, file.path, content);
   }
 
   async syncCycle(): Promise<void> {
@@ -294,6 +333,55 @@ export default class SynoraPlugin extends Plugin {
     this.api.setAccessToken(result.accessToken);
     await this.saveSettings();
     return result.deviceStatus === "active" ? "active" : "pending";
+  }
+
+  // One-time bulk reorganization: moves every image into the configured
+  // folder. app.fileManager.renameFile() is Obsidian's own move/rename
+  // API - it physically moves the file *and* rewrites every link to it
+  // across the vault (wikilinks and markdown links both), so notes stay
+  // correct with no markdown-parsing of our own needed. Each call also
+  // fires a real vault "rename" event, which syncs normally via
+  // onVaultRename/handleLocalRename - no separate sync logic needed here.
+  async moveImagesToConfiguredFolder(): Promise<{ moved: number; skipped: number }> {
+    const folder = this.settings.attachmentFolder?.trim();
+    if (!folder) throw new Error("Set an attachments folder first.");
+    if (!this.app.vault.getAbstractFileByPath(folder)) {
+      await this.app.vault.createFolder(folder).catch(() => {
+        // Already exists (race with something else) - fine, proceed.
+      });
+    }
+
+    let moved = 0;
+    let skipped = 0;
+    for (const file of this.app.vault.getFiles()) {
+      if (!IMAGE_EXTENSIONS.includes(file.extension.toLowerCase())) continue;
+      if ((file.parent?.path ?? "") === folder) {
+        skipped++;
+        continue;
+      }
+      const targetPath = this.uniqueTargetPath(folder, file.name);
+      try {
+        await this.app.fileManager.renameFile(file, targetPath);
+        moved++;
+      } catch (err) {
+        console.error(`Synora: failed to move ${file.path}`, err);
+        skipped++;
+      }
+    }
+    return { moved, skipped };
+  }
+
+  private uniqueTargetPath(folder: string, fileName: string): string {
+    let candidate = `${folder}/${fileName}`;
+    if (!this.app.vault.getAbstractFileByPath(candidate)) return candidate;
+
+    const dot = fileName.lastIndexOf(".");
+    const stem = dot === -1 ? fileName : fileName.slice(0, dot);
+    const ext = dot === -1 ? "" : fileName.slice(dot);
+    for (let i = 1; ; i++) {
+      candidate = `${folder}/${stem} ${i}${ext}`;
+      if (!this.app.vault.getAbstractFileByPath(candidate)) return candidate;
+    }
   }
 
   async createVault(): Promise<void> {

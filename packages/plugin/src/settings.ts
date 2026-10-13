@@ -6,6 +6,11 @@ export interface SynoraSettings {
   // styles.css). "none" changes nothing from Obsidian's default look.
   iconPack: "none" | "vscode";
 
+  // Undefined/empty = the "move images to a folder" feature isn't
+  // configured. One-time bulk reorganization, not an ongoing router -
+  // see main.ts moveImagesToConfiguredFolder().
+  attachmentFolder?: string;
+
   // Populated once signed in. The device secret key never leaves this
   // device by design; it lives here because Obsidian's plugin data file
   // is the only durable local storage available to a plugin. The vault
