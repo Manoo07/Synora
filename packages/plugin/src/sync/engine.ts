@@ -254,31 +254,47 @@ export class SyncEngine {
 
   // --- Incoming: remote change feed -> decrypt, apply, ack ---------------
 
-  async pull(): Promise<void> {
+  // Returns the paths of any changes that failed to apply (e.g. a
+  // filename with characters illegal on this device's filesystem - a
+  // real, confirmed case: a file created on macOS, where it's a legal
+  // name, failed this exact way on a device that rejects it). Without
+  // per-item error handling here, one bad file threw out of the whole
+  // loop, aborting *every* change after it - and since `since` never
+  // advanced past it, the next pull hit the identical error immediately,
+  // permanently blocking sync. Now a failure is skipped (with `since`
+  // still advancing past it, so it's never retried into the same dead
+  // end) rather than taking down everything behind it in the feed.
+  async pull(): Promise<{ skipped: string[] }> {
     const { api, vaultId, vaultKey, state, vault, suppressor } = this.deps;
     let since = await state.getLastAppliedSequence();
+    const skipped: string[] = [];
 
     for (;;) {
       const page = await api.getChanges(vaultId, since);
       for (const change of page.changes) {
-        if (change.operation === "deleted") {
-          const record = await state.findByFileId(change.fileId);
-          if (record) {
-            await vault.delete(record.logicalPath);
-            await state.remove(record.logicalPath);
+        try {
+          if (change.operation === "deleted") {
+            const record = await state.findByFileId(change.fileId);
+            if (record) {
+              await vault.delete(record.logicalPath);
+              await state.remove(record.logicalPath);
+            }
+          } else if (change.blobKey) {
+            const envelopeBytes = await api.getObject(vaultId, change.blobKey);
+            const manifest = decodeManifest(decryptEnvelope(vaultKey, decodeEnvelope(envelopeBytes)));
+            const hash = toHex(sha256(manifest.content));
+            suppressor.markApplied(manifest.logicalPath, hash);
+            await vault.write(manifest.logicalPath, manifest.content);
+            await state.upsert({
+              fileId: change.fileId,
+              logicalPath: manifest.logicalPath,
+              currentVersionId: change.versionId,
+              contentHash: hash,
+            });
           }
-        } else if (change.blobKey) {
-          const envelopeBytes = await api.getObject(vaultId, change.blobKey);
-          const manifest = decodeManifest(decryptEnvelope(vaultKey, decodeEnvelope(envelopeBytes)));
-          const hash = toHex(sha256(manifest.content));
-          suppressor.markApplied(manifest.logicalPath, hash);
-          await vault.write(manifest.logicalPath, manifest.content);
-          await state.upsert({
-            fileId: change.fileId,
-            logicalPath: manifest.logicalPath,
-            currentVersionId: change.versionId,
-            contentHash: hash,
-          });
+        } catch (err) {
+          console.error(`Synora: could not apply change for "${change.fileId}"`, err);
+          skipped.push(change.fileId);
         }
         since = change.sequence;
         await state.setLastAppliedSequence(since);
@@ -290,6 +306,8 @@ export class SyncEngine {
       // Best-effort: the next status check will simply show a larger
       // pending count until an ack succeeds. Not fatal to correctness.
     });
+
+    return { skipped };
   }
 }
 

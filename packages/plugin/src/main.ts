@@ -157,7 +157,8 @@ export default class SynoraPlugin extends Plugin {
     try {
       void this.updateStatusBar("syncing");
       await this.engine.flush();
-      await this.engine.pull();
+      const { skipped } = await this.engine.pull();
+      this.notifySkipped(skipped);
       await this.updateStatusBar("idle");
     } catch (err) {
       console.error("Synora: sync cycle failed", err);
@@ -281,7 +282,8 @@ export default class SynoraPlugin extends Plugin {
     // files as "new" and could create a second, unrelated file record
     // for a path the server already has, since paths are encrypted and
     // the server has no way to catch that collision on its own.
-    await this.engine.pull();
+    const pulled = await this.engine.pull();
+    this.notifySkipped(pulled.skipped);
 
     const files = this.app.vault.getFiles().filter((f) => !IGNORED_PREFIXES.some((p) => f.path.startsWith(p)));
     let queued = 0;
@@ -301,6 +303,19 @@ export default class SynoraPlugin extends Plugin {
 
   async getPendingUploadCount(): Promise<number> {
     return (await this.engine?.pendingUploadCount()) ?? 0;
+  }
+
+  // One file that pull() couldn't apply (e.g. a filename with characters
+  // illegal on this device's filesystem - confirmed live) used to abort
+  // every change behind it in the feed, silently, forever. pull() now
+  // skips just that file and keeps going; this is what makes the skip
+  // itself visible instead of trading one silent failure for another.
+  private notifySkipped(skipped: string[]): void {
+    if (skipped.length === 0) return;
+    new Notice(
+      `Synora: ${skipped.length} file${skipped.length === 1 ? "" : "s"} could not sync on this device (see console for details) - the rest synced normally.`,
+      15_000,
+    );
   }
 
   // Detaches this device from whatever vault it's currently pointed at -
@@ -356,8 +371,9 @@ export default class SynoraPlugin extends Plugin {
 
     const raw = ((await this.loadData()) as Record<string, unknown>) ?? {};
     await this.initEngine(new PluginDataStore(this, raw));
-    await this.engine?.pull();
+    const pulled = await this.engine?.pull();
     new Notice("Files pulled.");
+    if (pulled) this.notifySkipped(pulled.skipped);
   }
 
   async approveDevice(deviceId: string, devicePublicKeyB64: string): Promise<void> {
@@ -454,7 +470,8 @@ export default class SynoraPlugin extends Plugin {
     // background sync cycle (up to 30s away) - confusing right after
     // "Vault recovered" says nothing came through yet. Pull immediately
     // instead of making the user wait or go find the Scan button.
-    await this.engine?.pull();
+    const pulled = await this.engine?.pull();
     new Notice("Files pulled.");
+    if (pulled) this.notifySkipped(pulled.skipped);
   }
 }

@@ -102,6 +102,56 @@ describe("SyncEngine", () => {
     expect(new TextDecoder().decode(written)).toBe("device A content");
   });
 
+  it("skips a file that fails to write (e.g. illegal filename on this device) without blocking the rest of the pull", async () => {
+    const vaultKey = generateVaultKey();
+    const api1 = new SynoraApiClient("http://fake");
+    const vaultA = new MemoryVault();
+    const storeA = new InMemoryKeyValueStore();
+    const engineA = new SyncEngine({
+      api: api1,
+      vaultId: VAULT_ID,
+      vaultKey,
+      vault: vaultA,
+      queue: new SyncQueue(storeA),
+      state: new LocalStateStore(storeA),
+      suppressor: new WriteSuppressor(),
+    });
+
+    // Device A happily has a file with a colon in the name (legal on
+    // its own OS) alongside an ordinary one.
+    await engineA.handleLocalChange("Notes/3:45 Meeting.md", "created", new TextEncoder().encode("bad-name content"));
+    await engineA.handleLocalChange("Notes/ordinary.md", "created", new TextEncoder().encode("ordinary content"));
+    await engineA.flush();
+
+    const api2 = new SynoraApiClient("http://fake");
+    const vaultB = new MemoryVault();
+    vaultB.failWritesTo.add("Notes/3:45 Meeting.md");
+    const storeB = new InMemoryKeyValueStore();
+    const engineB = new SyncEngine({
+      api: api2,
+      vaultId: VAULT_ID,
+      vaultKey,
+      vault: vaultB,
+      queue: new SyncQueue(storeB),
+      state: new LocalStateStore(storeB),
+      suppressor: new WriteSuppressor(),
+    });
+
+    const result = await engineB.pull();
+    expect(result.skipped).toHaveLength(1);
+    // The file after the bad one in the feed must still have made it
+    // through - this is the actual bug: without per-item handling, one
+    // failure used to throw out of the whole loop and take every
+    // subsequent change down with it.
+    expect(new TextDecoder().decode(await vaultB.read("Notes/ordinary.md"))).toBe("ordinary content");
+
+    // A second pull must not throw or re-report the same failure - the
+    // cursor has to have advanced past it, or every future sync cycle
+    // would hit the identical error forever.
+    const secondResult = await engineB.pull();
+    expect(secondResult.skipped).toHaveLength(0);
+  });
+
   it("on a stale commit, preserves the remote version and files the local edit as a conflict copy", async () => {
     const vaultKey = generateVaultKey();
     const makeDeviceEngine = () => {
