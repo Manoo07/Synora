@@ -317,4 +317,50 @@ describe("SyncEngine", () => {
     const changes = await api.getChanges(VAULT_ID, 0, 500);
     expect(changes.changes).toHaveLength(2);
   });
+
+  it("never sends an empty-string fileId for a second edit to a not-yet-synced file", async () => {
+    const { engine, queue } = buildEngine();
+
+    // Neither edit has flushed, so the file has no real fileId yet -
+    // local state still has to store *something* for "unknown" (it
+    // persists "" rather than leaving the field absent), and that stored
+    // "" must never leak back out into an outgoing op. The real backend
+    // validates a *present* fileId as a UUID, so a leaked "" fails with
+    // an opaque "Invalid uuid" - confirmed live.
+    await engine.handleLocalChange("note.md", "created", new TextEncoder().encode("v1"));
+    await engine.handleLocalChange("note.md", "updated", new TextEncoder().encode("v2"));
+
+    const pending = await queue.list();
+    expect(pending).toHaveLength(1);
+    expect(pending[0]!.fileId).toBeUndefined();
+  });
+
+  it("flush() drops a permanently-invalid op instead of blocking every other queued edit behind it", async () => {
+    const { engine, queue, api } = buildEngine();
+
+    // Simulates the real bug's symptom directly - a queued op with a
+    // corrupted fileId, as could happen before the fix above. Enqueued
+    // first so a real regression (flush() throwing out of the whole
+    // loop) would also block the good edit queued right after it.
+    await queue.enqueue({
+      idempotencyKey: "bad-op",
+      logicalPath: "broken.md",
+      fileId: "",
+      operation: "updated",
+      envelopeBase64: btoa("not a real envelope, but fine for this fake server"),
+      ciphertextHash: "deadbeef",
+      sizeBytes: 10,
+      enqueuedAt: Date.now(),
+    });
+    await engine.handleLocalChange("ok.md", "created", new TextEncoder().encode("fine"));
+
+    const { failed } = await engine.flush();
+
+    expect(failed).toEqual(["broken.md"]);
+    // The bad op is gone (dropped, not stuck retrying forever), and the
+    // good one behind it still made it through.
+    expect(await queue.list()).toHaveLength(0);
+    const changes = await api.getChanges(VAULT_ID, 0, 500);
+    expect(changes.changes).toHaveLength(1);
+  });
 });

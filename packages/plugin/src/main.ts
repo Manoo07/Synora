@@ -225,7 +225,8 @@ export default class SynoraPlugin extends Plugin {
     this.isSyncing = true;
     try {
       void this.updateStatusBar("syncing");
-      await this.engine.flush();
+      const { failed } = await this.engine.flush();
+      this.notifyFailed(failed);
       const { skipped } = await this.engine.pull();
       this.notifySkipped(skipped);
       await this.updateStatusBar("idle");
@@ -463,6 +464,18 @@ export default class SynoraPlugin extends Plugin {
     if (skipped.length === 0) return;
     new Notice(
       `Synora: ${skipped.length} file${skipped.length === 1 ? "" : "s"} could not sync on this device (see console for details) - the rest synced normally.`,
+      15_000,
+    );
+  }
+
+  // Mirrors notifySkipped above, but for the push side: an edit the
+  // server permanently rejected (not a transient failure - see
+  // engine.ts flush()) and dropped from the queue rather than retrying
+  // forever. Re-editing the file queues a fresh, valid change.
+  private notifyFailed(failed: string[]): void {
+    if (failed.length === 0) return;
+    new Notice(
+      `Synora: ${failed.length} edit${failed.length === 1 ? "" : "s"} could not be synced and ${failed.length === 1 ? "was" : "were"} dropped (see console for details) - re-save the file to try again: ${failed.join(", ")}`,
       15_000,
     );
   }

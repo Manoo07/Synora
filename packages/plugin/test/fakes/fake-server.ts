@@ -76,6 +76,18 @@ export class FakeApiServer {
         return this.json(this.idempotency.get(body.idempotencyKey));
       }
 
+      // The real backend validates a *present* fileId/baseVersionId as a
+      // UUID via zod, rejecting an empty string with a 400 "Invalid
+      // uuid" - confirmed live as the root cause of a real bug (see
+      // engine.test.ts "flush() drops a permanently-invalid op..."). This
+      // fake doesn't otherwise generate real UUID-shaped ids itself
+      // (its own ids look like "file-3"/"version-5"), so it only checks
+      // for the one thing that actually mattered for that bug - a
+      // present-but-empty value - rather than full UUID-format fidelity.
+      if (body.fileId === "" || body.baseVersionId === "") {
+        return this.json({ error: "bad_request", message: "Invalid uuid" }, 400);
+      }
+
       let fileId = body.fileId;
       if (fileId) {
         const file = this.files.get(fileId);

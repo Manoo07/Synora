@@ -1,5 +1,5 @@
 import { sha256 } from "@noble/hashes/sha256";
-import { SynoraApiClient } from "../api/client.js";
+import { SynoraApiClient, ApiError } from "../api/client.js";
 import { encryptEnvelope, decryptEnvelope, encodeEnvelope, decodeEnvelope } from "../crypto/envelope.js";
 import { encodeManifest, decodeManifest } from "../crypto/manifest.js";
 import { SyncQueue, type PendingOp } from "./queue.js";
@@ -82,7 +82,16 @@ export class SyncEngine {
   ): Promise<void> {
     const { state, queue, vaultKey, vaultId } = this.deps;
     const existing = await state.getByPath(path);
-    const fileId = existing?.fileId;
+    // state.upsert() below always writes a *string* fileId, storing "not
+    // known yet" as "" rather than leaving it absent (FileRecord.fileId
+    // isn't optional) - so a not-yet-synced file's record has fileId ""
+    // once this function has run on it once. Without this fallback, a
+    // SECOND edit to that same file before the first one flushes would
+    // read that "" back out and send it to the server as this op's
+    // fileId - the server's zod schema accepts an *absent* fileId but
+    // validates a *present* one as a UUID, so "" fails validation with
+    // the unhelpful "Invalid uuid" - confirmed live.
+    const fileId = existing?.fileId || undefined;
     const bytes = content ?? new Uint8Array(0);
     const contentHash = toHex(sha256(bytes));
 
@@ -138,40 +147,66 @@ export class SyncEngine {
 
   // --- Flushing the queue: upload, commit, resolve conflicts -------------
 
-  async flush(): Promise<void> {
+  // Returns the logical paths of any queued edits that failed to sync
+  // and were dropped. flush() previously had no per-item error handling
+  // at all: one op hitting a non-retryable error (e.g. the "Invalid
+  // uuid" case above, or any other malformed-data rejection) threw out
+  // of the whole loop, permanently blocking every op queued behind it on
+  // every future sync cycle too - the same class of bug pull() had
+  // before 0.1.17's skip-and-continue fix, just never applied here.
+  // A genuine 4xx means this exact request will never succeed no matter
+  // how many times it's retried, so it's dropped from the queue (rather
+  // than retried forever) and reported; anything else (network hiccup,
+  // 5xx) is left queued to retry next cycle, and the loop still moves on
+  // to the next op either way.
+  async flush(): Promise<{ failed: string[] }> {
     const { api, vaultId, queue } = this.deps;
+    const failed: string[] = [];
+
     for (const op of await queue.list()) {
-      const bytes = fromBase64(op.envelopeBase64);
-      const upload = await api.requestUpload(vaultId);
-      await api.putBlob(upload.uploadUrl, bytes);
+      try {
+        const bytes = fromBase64(op.envelopeBase64);
+        const upload = await api.requestUpload(vaultId);
+        await api.putBlob(upload.uploadUrl, bytes);
 
-      const result = await api.commit(vaultId, {
-        fileId: op.fileId,
-        baseVersionId: op.baseVersionId,
-        blobKey: upload.uploadId,
-        ciphertextHash: op.ciphertextHash,
-        sizeBytes: op.sizeBytes,
-        operation: op.operation,
-        idempotencyKey: op.idempotencyKey,
-      });
-
-      if (result.status === "committed") {
-        await this.deps.state.upsert({
-          fileId: result.fileId,
-          logicalPath: op.logicalPath,
-          currentVersionId: result.versionId,
-          contentHash: (await this.deps.state.getByPath(op.logicalPath))?.contentHash ?? "",
+        const result = await api.commit(vaultId, {
+          fileId: op.fileId,
+          baseVersionId: op.baseVersionId,
+          blobKey: upload.uploadId,
+          ciphertextHash: op.ciphertextHash,
+          sizeBytes: op.sizeBytes,
+          operation: op.operation,
+          idempotencyKey: op.idempotencyKey,
         });
-        await queue.remove(op.idempotencyKey);
-        continue;
-      }
 
-      // Conflict: someone else moved this file forward. Safe default is
-      // to preserve both - download the winning remote version into the
-      // vault at its normal path, and re-file our pending edit as an
-      // explicit conflict copy rather than attempting a blind overwrite.
-      await this.resolveConflict(op, result.currentFileId, result.currentVersionId);
+        if (result.status === "committed") {
+          await this.deps.state.upsert({
+            fileId: result.fileId,
+            logicalPath: op.logicalPath,
+            currentVersionId: result.versionId,
+            contentHash: (await this.deps.state.getByPath(op.logicalPath))?.contentHash ?? "",
+          });
+          await queue.remove(op.idempotencyKey);
+          continue;
+        }
+
+        // Conflict: someone else moved this file forward. Safe default is
+        // to preserve both - download the winning remote version into the
+        // vault at its normal path, and re-file our pending edit as an
+        // explicit conflict copy rather than attempting a blind overwrite.
+        await this.resolveConflict(op, result.currentFileId, result.currentVersionId);
+      } catch (err) {
+        console.error(`Synora: could not sync "${op.logicalPath}"`, err);
+        if (err instanceof ApiError && err.status >= 400 && err.status < 500) {
+          await queue.remove(op.idempotencyKey);
+          failed.push(op.logicalPath);
+        }
+        // Anything else (network failure, 5xx) is transient - leave it
+        // queued to retry next cycle rather than dropping real work.
+      }
     }
+
+    return { failed };
   }
 
   private async resolveConflict(
