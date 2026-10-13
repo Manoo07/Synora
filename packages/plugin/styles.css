@@ -44,10 +44,23 @@
 /* --- "VS Code style" file icon pack ---------------------------------
    Pure CSS: Obsidian sets a `data-path` attribute on every file-explorer
    row, so file type can be matched by extension via attribute selectors
-   alone - no DOM watching needed. Each icon is a small inline SVG used
-   as a mask (so it recolors via `color`), scoped so toggling the
-   "synora-icon-pack-vscode" body class is the only thing the plugin
-   does in JS (main.ts applyIconPack()). */
+   alone - no DOM watching needed. Toggling the "synora-icon-pack-vscode"
+   body class is the only thing the plugin does in JS (main.ts
+   applyIconPack()).
+
+   Icons for folders/markdown/images/json are the actual assets from the
+   vscode-icons project (github.com/vscode-icons/vscode-icons), MIT
+   licensed - reused here (as inline SVG data URIs, each used exactly as
+   published) rather than approximated, so this really is "the same icon
+   feel" rather than a lookalike. Each is rendered as a native
+   background-image (not a recolored mask) specifically to preserve their
+   real multi-color artwork - the brown markdown glyph, yellow JSON
+   braces, gold folder, teal image frame are all original vscode-icons
+   colors, not reinterpreted. The PDF/canvas/generic-file icons are
+   vscode-icons' default_file silhouette recolored per type (the real
+   file_type_pdf icon is a much heavier multi-gradient asset not worth
+   the size for a notes vault); the "(conflict ...)" icon is Synora's own
+   (no vscode-icons equivalent exists for that concept). */
 
 .synora-icon-pack-vscode .nav-folder-title .nav-folder-title-content,
 .synora-icon-pack-vscode .nav-file-title .nav-file-title-content {
@@ -62,22 +75,29 @@
   left: 0;
   top: 50%;
   transform: translateY(-50%);
-  width: 14px;
-  height: 14px;
-  background-color: currentColor;
-  -webkit-mask: var(--synora-icon) center / contain no-repeat;
-  mask: var(--synora-icon) center / contain no-repeat;
+  width: 15px;
+  height: 15px;
+  background: var(--synora-icon) center / contain no-repeat;
 }
 
+/* Folder - closed (default) and open (expanded, not collapsed) states,
+   matching Obsidian's own .is-collapsed toggle on .nav-folder. */
 .synora-icon-pack-vscode .nav-folder-title .nav-folder-title-content::before {
-  --synora-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M1 3.5A1.5 1.5 0 0 1 2.5 2h3.17a1.5 1.5 0 0 1 1.06.44L7.83 3.5H13.5A1.5 1.5 0 0 1 15 5v7.5A1.5 1.5 0 0 1 13.5 14h-11A1.5 1.5 0 0 1 1 12.5v-9z'/%3E%3C/svg%3E");
-  color: var(--color-blue, #4a9eff);
+  --synora-icon: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><path d="M27.5,5.5H18.2L16.1,9.7H4.4V26.5H29.6V5.5Zm0,4.2H19.3l1.1-2.1h7.1Z" style="fill:%23c09553"/></svg>');
+}
+
+.synora-icon-pack-vscode .nav-folder:not(.is-collapsed) > .nav-folder-title .nav-folder-title-content::before {
+  --synora-icon: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><path d="M27.4,5.5H18.2L16.1,9.7H4.3V26.5H29.5V5.5Zm0,18.7H6.6V11.8H27.4Zm0-14.5H19.2l1-2.1h7.1V9.7Z" style="fill:%23dcb67a"/><polygon points="25.7 13.7 0.5 13.7 4.3 26.5 29.5 26.5 25.7 13.7" style="fill:%23dcb67a"/></svg>');
+}
+
+/* Generic file fallback - vscode-icons' own "default_file" look. */
+.synora-icon-pack-vscode .nav-file-title .nav-file-title-content::before {
+  --synora-icon: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><path d="M20.414,2H5V30H27V8.586ZM7,28V4H19v6h6V28Z" style="fill:%23c5c5c5"/></svg>');
 }
 
 .synora-icon-pack-vscode .nav-file-title[data-path$=".md"] .nav-file-title-content::before,
 .synora-icon-pack-vscode .nav-file-title[data-path$=".markdown"] .nav-file-title-content::before {
-  --synora-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3 1.5A1.5 1.5 0 0 1 4.5 0h4.6a1.5 1.5 0 0 1 1.06.44l2.4 2.4A1.5 1.5 0 0 1 13 3.9v10.6A1.5 1.5 0 0 1 11.5 16h-7A1.5 1.5 0 0 1 3 14.5v-13z'/%3E%3C/svg%3E");
-  color: var(--color-cyan, #5ac8c8);
+  --synora-icon: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect x="2.5" y="7.955" width="27" height="16.091" style="fill:none;stroke:%23755838"/><polygon points="5.909 20.636 5.909 11.364 8.636 11.364 11.364 14.773 14.091 11.364 16.818 11.364 16.818 20.636 14.091 20.636 14.091 15.318 11.364 18.727 8.636 15.318 8.636 20.636 5.909 20.636" style="fill:%23755838"/><polygon points="22.955 20.636 18.864 16.136 21.591 16.136 21.591 11.364 24.318 11.364 24.318 16.136 27.045 16.136 22.955 20.636" style="fill:%23755838"/></svg>');
 }
 
 .synora-icon-pack-vscode .nav-file-title[data-path$=".png"] .nav-file-title-content::before,
@@ -86,25 +106,27 @@
 .synora-icon-pack-vscode .nav-file-title[data-path$=".gif"] .nav-file-title-content::before,
 .synora-icon-pack-vscode .nav-file-title[data-path$=".svg"] .nav-file-title-content::before,
 .synora-icon-pack-vscode .nav-file-title[data-path$=".webp"] .nav-file-title-content::before {
-  --synora-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill-rule='evenodd' d='M1.5 2h13A1.5 1.5 0 0 1 16 3.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 0 12.5v-9A1.5 1.5 0 0 1 1.5 2zm0 1a.5.5 0 0 0-.5.5v9a.5.5 0 0 0 .5.5h13a.5.5 0 0 0 .5-.5v-9a.5.5 0 0 0-.5-.5h-13zM4.5 7a1 1 0 1 1 0-2 1 1 0 0 1 0 2zM2.5 12.5l3.2-4 2.3 2.8 1.8-2.3 3.7 3.5H2.5z'/%3E%3C/svg%3E");
-  color: var(--color-purple, #b57edc);
+  --synora-icon: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><path d="M30,5.851Q30,16,30,26.149H2Q2,16,2,5.851H30" style="fill:%232dcc9f"/><path d="M24.232,8.541a2.2,2.2,0,1,0,1.127.623,2.212,2.212,0,0,0-1.127-.623" style="fill:%23fff"/><path d="M18.111,20.1q-2.724-3.788-5.45-7.575Q8.619,18.147,4.579,23.766q5.449,0,10.9,0,1.316-1.832,2.634-3.663" style="fill:%23fff"/><path d="M22.057,16q-2.793,3.882-5.584,7.765,5.584,0,11.169,0Q24.851,19.882,22.057,16Z" style="fill:%23fff"/></svg>');
 }
 
+.synora-icon-pack-vscode .nav-file-title[data-path$=".json"] .nav-file-title-content::before {
+  --synora-icon: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><path d="M4.014,14.976a2.51,2.51,0,0,0,1.567-.518A2.377,2.377,0,0,0,6.386,13.1,15.261,15.261,0,0,0,6.6,10.156q.012-2.085.075-2.747a5.236,5.236,0,0,1,.418-1.686,3.025,3.025,0,0,1,.755-1.018A3.046,3.046,0,0,1,9,4.125,6.762,6.762,0,0,1,10.544,4h.7V5.96h-.387a2.338,2.338,0,0,0-1.723.468A3.4,3.4,0,0,0,8.709,8.52a36.054,36.054,0,0,1-.137,4.133,4.734,4.734,0,0,1-.768,2.06A4.567,4.567,0,0,1,6.1,16a3.809,3.809,0,0,1,1.992,1.754,8.861,8.861,0,0,1,.618,3.865q0,2.435.05,2.9A1.755,1.755,0,0,0,9.264,25.7a2.639,2.639,0,0,0,1.592.337h.387V28h-.7a5.655,5.655,0,0,1-1.773-.2,2.97,2.97,0,0,1-1.324-.93,3.353,3.353,0,0,1-.681-1.63A24.175,24.175,0,0,1,6.6,22.006,16.469,16.469,0,0,0,6.386,18.9a2.408,2.408,0,0,0-.805-1.361,2.489,2.489,0,0,0-1.567-.524Z" style="fill:%23f5de19"/><path d="M27.986,17.011a2.489,2.489,0,0,0-1.567.524,2.408,2.408,0,0,0-.805,1.361,16.469,16.469,0,0,0-.212,3.109,24.175,24.175,0,0,1-.169,3.234,3.353,3.353,0,0,1-.681,1.63,2.97,2.97,0,0,1-1.324.93,5.655,5.655,0,0,1-1.773.2h-.7V26.04h.387a2.639,2.639,0,0,0,1.592-.337,1.755,1.755,0,0,0,.506-1.186q.05-.462.05-2.9a8.861,8.861,0,0,1,.618-3.865A3.809,3.809,0,0,1,25.9,16a4.567,4.567,0,0,1-1.7-1.286,4.734,4.734,0,0,1-.768-2.06,36.054,36.054,0,0,1-.137-4.133,3.4,3.4,0,0,0-.425-2.092,2.338,2.338,0,0,0-1.723-.468h-.387V4h.7A6.762,6.762,0,0,1,23,4.125a3.046,3.046,0,0,1,1.149.581,3.025,3.025,0,0,1,.755,1.018,5.236,5.236,0,0,1,.418,1.686q.062.662.075,2.747a15.261,15.261,0,0,0,.212,2.947,2.377,2.377,0,0,0,.805,1.355,2.51,2.51,0,0,0,1.567.518Z" style="fill:%23f5de19"/></svg>');
+}
+
+/* vscode-icons' default_file silhouette, recolored per type (the real
+   file_type_pdf asset is a much heavier multi-gradient icon). */
 .synora-icon-pack-vscode .nav-file-title[data-path$=".pdf"] .nav-file-title-content::before {
-  --synora-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3 1.5A1.5 1.5 0 0 1 4.5 0h4.6a1.5 1.5 0 0 1 1.06.44l2.4 2.4A1.5 1.5 0 0 1 13 3.9v10.6A1.5 1.5 0 0 1 11.5 16h-7A1.5 1.5 0 0 1 3 14.5v-13z'/%3E%3C/svg%3E");
-  color: var(--color-red, #e06c75);
+  --synora-icon: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><path d="M20.414,2H5V30H27V8.586ZM7,28V4H19v6h6V28Z" style="fill:%23e34c4c"/></svg>');
 }
 
 .synora-icon-pack-vscode .nav-file-title[data-path$=".canvas"] .nav-file-title-content::before {
-  --synora-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3 1.5A1.5 1.5 0 0 1 4.5 0h4.6a1.5 1.5 0 0 1 1.06.44l2.4 2.4A1.5 1.5 0 0 1 13 3.9v10.6A1.5 1.5 0 0 1 11.5 16h-7A1.5 1.5 0 0 1 3 14.5v-13z'/%3E%3C/svg%3E");
-  color: var(--color-green, #7ec07e);
+  --synora-icon: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><path d="M20.414,2H5V30H27V8.586ZM7,28V4H19v6h6V28Z" style="fill:%237ec07e"/></svg>');
 }
 
 /* Synora's own conflict copies get a distinct, warning-colored icon so
-   they stand out from ordinary notes in a large vault - this is the one
-   rule specific to this project rather than a generic file type. Placed
-   last so it wins over the .md rule above on specificity-tied selectors. */
+   they stand out from ordinary notes in a large vault - no vscode-icons
+   equivalent exists for this concept. Placed last so it wins over the
+   .md rule above on specificity-tied selectors. */
 .synora-icon-pack-vscode .nav-file-title[data-path*=" (conflict "] .nav-file-title-content::before {
-  --synora-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill-rule='evenodd' d='M9.05 2.11a1.2 1.2 0 0 1 2.1 0l6.3 11.2A1.2 1.2 0 0 1 16.4 15H1.6a1.2 1.2 0 0 1-1.05-1.69l6.3-11.2zM9.25 6h1.5v5h-1.5V6zm0 6.5h1.5V14h-1.5v-1.5z'/%3E%3C/svg%3E");
-  color: var(--text-warning, #e5a84b);
+  --synora-icon: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path fill-rule="evenodd" fill="%23e5a84b" d="M9.05 2.11a1.2 1.2 0 0 1 2.1 0l6.3 11.2A1.2 1.2 0 0 1 16.4 15H1.6a1.2 1.2 0 0 1-1.05-1.69l6.3-11.2zM9.25 6h1.5v5h-1.5V6zm0 6.5h1.5V14h-1.5v-1.5z"/></svg>');
 }
