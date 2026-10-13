@@ -9,6 +9,7 @@ export interface AppBindings {
   DB: Db;
   BUCKET: BlobBucket;
   JWT_SECRET: string;
+  RATE_LIMIT: KVNamespace;
 }
 
 export interface AppVariables {

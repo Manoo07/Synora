@@ -4,10 +4,17 @@ import { z } from "zod";
 import type { AppEnv } from "../context.js";
 import { files, fileVersions, changeEvents, deviceCursors, storageObjects } from "../db/schema.js";
 import { requireAuth, requireVaultAccess } from "../auth/middleware.js";
-import { badRequest, conflict, notFound } from "../lib/errors.js";
+import { badRequest, conflict, notFound, payloadTooLarge } from "../lib/errors.js";
 
 export const syncRoutes = new Hono<AppEnv>();
 syncRoutes.use("*", requireAuth);
+
+// Generous for a notes vault (covers large attachments/PDFs/images) while
+// still bounding the worst case of a single upload - uploads are
+// authenticated (can't be hit by a totally anonymous attacker), but an
+// unbounded per-file size still means one compromised or malicious
+// account could run up real R2 storage cost in a single request.
+const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
 
 // --- Uploads --------------------------------------------------------------
 //
@@ -28,7 +35,11 @@ syncRoutes.put("/:vaultId/uploads/:blobKey", async (c) => {
   const blobKey = decodeURIComponent(c.req.param("blobKey"));
   if (!blobKey.startsWith(`${vaultId}/`)) throw badRequest("Blob key does not belong to this vault");
 
+  const declaredLength = Number(c.req.header("content-length") ?? "0");
+  if (declaredLength > MAX_UPLOAD_BYTES) throw payloadTooLarge(`Upload exceeds the ${MAX_UPLOAD_BYTES} byte limit`);
+
   const bytes = new Uint8Array(await c.req.arrayBuffer());
+  if (bytes.byteLength > MAX_UPLOAD_BYTES) throw payloadTooLarge(`Upload exceeds the ${MAX_UPLOAD_BYTES} byte limit`);
   const hashBuffer = await crypto.subtle.digest("SHA-256", bytes);
   const ciphertextHash = Array.from(new Uint8Array(hashBuffer))
     .map((b) => b.toString(16).padStart(2, "0"))

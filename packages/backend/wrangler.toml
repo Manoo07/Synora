@@ -18,3 +18,9 @@ localConnectionString = "postgres://synora:synora@localhost:5435/synora"
 
 # JWT_SECRET is set as a real secret (`wrangler secret put JWT_SECRET`),
 # not a [vars] entry - a binding can't be both.
+
+# Used to rate-limit the unauthenticated auth endpoints (register/login)
+# by IP - see auth/rate-limit.ts.
+[[kv_namespaces]]
+binding = "RATE_LIMIT"
+id = "cd55fecb2629469f9064498719e0efed"

@@ -206,4 +206,19 @@ describe("sync protocol", () => {
     );
     expect((await statusAfter.json()) as { pendingCount: number }).toMatchObject({ pendingCount: 0 });
   });
+
+  it("rejects an upload over the size cap", async () => {
+    const bindings = testBindings();
+    const alice = await registerUser(bindings, "alice@example.com");
+    const vault = await createVault(bindings, alice.accessToken);
+    const upload = await requestUpload(bindings, alice.accessToken, vault.id);
+
+    const oversized = new Uint8Array(100 * 1024 * 1024 + 1);
+    const res = await app.request(
+      upload.uploadUrl,
+      { method: "PUT", headers: { authorization: `Bearer ${alice.accessToken}` }, body: oversized },
+      bindings,
+    );
+    expect(res.status).toBe(413);
+  });
 });

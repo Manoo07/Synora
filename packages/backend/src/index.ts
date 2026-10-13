@@ -37,12 +37,18 @@ interface WorkerBindings {
   HYPERDRIVE: { connectionString: string };
   BUCKET: AppBindings["BUCKET"];
   JWT_SECRET: string;
+  RATE_LIMIT: AppBindings["RATE_LIMIT"];
 }
 
 export default {
   async fetch(request: Request, env: WorkerBindings, ctx: ExecutionContext): Promise<Response> {
     const { db, close } = openDb(env.HYPERDRIVE.connectionString);
-    const bindings: AppBindings = { DB: db, BUCKET: env.BUCKET, JWT_SECRET: env.JWT_SECRET };
+    const bindings: AppBindings = {
+      DB: db,
+      BUCKET: env.BUCKET,
+      JWT_SECRET: env.JWT_SECRET,
+      RATE_LIMIT: env.RATE_LIMIT,
+    };
     try {
       return await app.fetch(request, bindings, ctx);
     } finally {

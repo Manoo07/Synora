@@ -1,13 +1,27 @@
-import { Hono } from "hono";
+import { Hono, type MiddlewareHandler } from "hono";
 import { eq, and } from "drizzle-orm";
 import { z } from "zod";
 import type { AppEnv } from "../context.js";
 import { users, devices } from "../db/schema.js";
 import { hashPassword, verifyPassword } from "../auth/password.js";
 import { issueAccessToken } from "../auth/jwt.js";
-import { badRequest, unauthorized } from "../lib/errors.js";
+import { checkRateLimit, clientIp } from "../auth/rate-limit.js";
+import { badRequest, tooManyRequests, unauthorized } from "../lib/errors.js";
 
 export const authRoutes = new Hono<AppEnv>();
+
+// These two endpoints are the only ones a stranger can call at all with
+// no account - and each does real CPU work (password hashing), so an
+// unthrottled flood is both an account-spam vector and a real cost/DoS
+// risk, not just an annoyance. Limits are per-IP, generous enough for a
+// real user fumbling their password a few times.
+function rateLimited(limit: number, windowSeconds: number): MiddlewareHandler<AppEnv> {
+  return async (c, next) => {
+    const ok = await checkRateLimit(c.env.RATE_LIMIT, `${clientIp(c.req.raw.headers)}:${c.req.path}`, limit, windowSeconds);
+    if (!ok) throw tooManyRequests("Too many attempts - please wait a few minutes and try again.");
+    await next();
+  };
+}
 
 const registerSchema = z.object({
   email: z.string().email(),
@@ -19,7 +33,7 @@ const registerSchema = z.object({
 // Registration bootstraps the account's first device as trusted — there is
 // no other device to approve it against yet. Every subsequent device must
 // go through POST /vaults/:vaultId/devices enrollment instead.
-authRoutes.post("/register", async (c) => {
+authRoutes.post("/register", rateLimited(10, 600), async (c) => {
   const body = registerSchema.parse(await c.req.json());
 
   const existing = await c.env.DB.select().from(users).where(eq(users.email, body.email)).limit(1);
@@ -42,7 +56,7 @@ const loginSchema = z.object({
   deviceName: z.string().min(1).default("New device"),
 });
 
-authRoutes.post("/login", async (c) => {
+authRoutes.post("/login", rateLimited(20, 600), async (c) => {
   const body = loginSchema.parse(await c.req.json());
 
   const [user] = await c.env.DB.select().from(users).where(eq(users.email, body.email)).limit(1);
