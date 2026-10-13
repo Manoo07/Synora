@@ -2,6 +2,9 @@ export interface SynoraSettings {
   serverUrl: string;
   deviceName: string;
   syncIntervalSeconds: number;
+  // Purely cosmetic - toggles a CSS-only file-explorer icon pack (see
+  // styles.css). "none" changes nothing from Obsidian's default look.
+  iconPack: "none" | "vscode";
 
   // Populated once signed in. The device secret key never leaves this
   // device by design; it lives here because Obsidian's plugin data file
@@ -21,4 +24,5 @@ export const DEFAULT_SETTINGS: SynoraSettings = {
   serverUrl: "http://localhost:8787",
   deviceName: "Obsidian device",
   syncIntervalSeconds: 30,
+  iconPack: "none",
 };

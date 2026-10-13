@@ -94,6 +94,16 @@ export default class SynoraPlugin extends Plugin {
     this.registerInterval(
       window.setInterval(() => void this.syncCycle(), this.settings.syncIntervalSeconds * 1000),
     );
+
+    this.applyIconPack();
+  }
+
+  // Purely cosmetic: toggles a body class that gates the CSS-only icon
+  // rules in styles.css (file-explorer icons by extension, via the
+  // data-path attribute Obsidian already sets on each row) - no DOM
+  // watching needed. Called on load and whenever the setting changes.
+  applyIconPack(): void {
+    document.body.toggleClass("synora-icon-pack-vscode", this.settings.iconPack === "vscode");
   }
 
   // Reusable whenever the engine might need to come up: on load, and

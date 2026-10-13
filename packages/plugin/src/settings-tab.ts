@@ -68,6 +68,21 @@ export class SynoraSettingTab extends PluginSettingTab {
       }),
     );
 
+    new Setting(this.containerEl)
+      .setName("File icon pack")
+      .setDesc("Adds file-type icons to the file explorer, for easier scanning of large vaults.")
+      .addDropdown((dd) =>
+        dd
+          .addOption("none", "None (default)")
+          .addOption("vscode", "VS Code style")
+          .setValue(this.plugin.settings.iconPack)
+          .onChange(async (value) => {
+            this.plugin.settings.iconPack = value as "none" | "vscode";
+            await this.plugin.saveSettings();
+            this.plugin.applyIconPack();
+          }),
+      );
+
     const needsRecovery = this.pendingNotice || this.plugin.needsVaultKeyRecovery;
     if (this.plugin.settings.accessToken && !needsRecovery) {
       this.renderSignedIn();
