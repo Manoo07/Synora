@@ -1,5 +1,6 @@
 import type { Db } from "./db/client.js";
 import type { BlobBucket } from "./storage/types.js";
+import type { RateLimiter } from "./auth/rate-limit.js";
 
 // Bindings is deliberately our own shape, not Cloudflare's raw Env — the
 // Worker entrypoint (index.ts) adapts real bindings (Hyperdrive, R2,
@@ -9,7 +10,8 @@ export interface AppBindings {
   DB: Db;
   BUCKET: BlobBucket;
   JWT_SECRET: string;
-  RATE_LIMIT: KVNamespace;
+  RATE_LIMIT_REGISTER: RateLimiter;
+  RATE_LIMIT_LOGIN: RateLimiter;
 }
 
 export interface AppVariables {

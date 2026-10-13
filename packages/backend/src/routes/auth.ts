@@ -13,12 +13,13 @@ export const authRoutes = new Hono<AppEnv>();
 // These two endpoints are the only ones a stranger can call at all with
 // no account - and each does real CPU work (password hashing), so an
 // unthrottled flood is both an account-spam vector and a real cost/DoS
-// risk, not just an annoyance. Limits are per-IP, generous enough for a
-// real user fumbling their password a few times.
-function rateLimited(limit: number, windowSeconds: number): MiddlewareHandler<AppEnv> {
+// risk, not just an annoyance. Limited per-IP; the limit/period
+// themselves live in wrangler.toml (one binding per limit - the
+// binding only supports a single fixed configuration).
+function rateLimited(bindingKey: "RATE_LIMIT_REGISTER" | "RATE_LIMIT_LOGIN"): MiddlewareHandler<AppEnv> {
   return async (c, next) => {
-    const ok = await checkRateLimit(c.env.RATE_LIMIT, `${clientIp(c.req.raw.headers)}:${c.req.path}`, limit, windowSeconds);
-    if (!ok) throw tooManyRequests("Too many attempts - please wait a few minutes and try again.");
+    const ok = await checkRateLimit(c.env[bindingKey], clientIp(c.req.raw.headers));
+    if (!ok) throw tooManyRequests("Too many attempts - please wait a minute and try again.");
     await next();
   };
 }
@@ -33,7 +34,7 @@ const registerSchema = z.object({
 // Registration bootstraps the account's first device as trusted — there is
 // no other device to approve it against yet. Every subsequent device must
 // go through POST /vaults/:vaultId/devices enrollment instead.
-authRoutes.post("/register", rateLimited(10, 600), async (c) => {
+authRoutes.post("/register", rateLimited("RATE_LIMIT_REGISTER"), async (c) => {
   const body = registerSchema.parse(await c.req.json());
 
   const existing = await c.env.DB.select().from(users).where(eq(users.email, body.email)).limit(1);
@@ -56,7 +57,7 @@ const loginSchema = z.object({
   deviceName: z.string().min(1).default("New device"),
 });
 
-authRoutes.post("/login", rateLimited(20, 600), async (c) => {
+authRoutes.post("/login", rateLimited("RATE_LIMIT_LOGIN"), async (c) => {
   const body = loginSchema.parse(await c.req.json());
 
   const [user] = await c.env.DB.select().from(users).where(eq(users.email, body.email)).limit(1);
