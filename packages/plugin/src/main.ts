@@ -1,4 +1,4 @@
-import { Notice, Plugin, TAbstractFile, TFile, setIcon } from "obsidian";
+import { Notice, Plugin, TAbstractFile, TFile, TFolder, setIcon } from "obsidian";
 import { sha256 } from "@noble/hashes/sha256";
 import { ApiError, SynoraApiClient } from "./api/client.js";
 import { obsidianTransport } from "./api/obsidian-transport.js";
@@ -220,7 +220,31 @@ export default class SynoraPlugin extends Plugin {
   // debounced handler rather than reusing onVaultEvent/handleDebounced.
   private onVaultRename(file: TAbstractFile, oldPath: string): void {
     if (IGNORED_PREFIXES.some((p) => file.path.startsWith(p) || oldPath.startsWith(p))) return;
-    if (!(file instanceof TFile)) return; // folders: contained files get their own rename events
+
+    // Confirmed live: restructuring a folder left every file inside it
+    // un-synced under its old path, while the new path looked like an
+    // unrelated new file - both ends up existing forever, on every
+    // other device, duplicated. Obsidian cascading individual rename
+    // events to every contained file isn't something to rely on -
+    // handled explicitly here instead, regardless of whatever Obsidian
+    // itself also does. Matches every file now living under the new
+    // folder path (at any depth) against vault.getFiles(), not nested
+    // folder-rename events, so it's correct even if Obsidian only fires
+    // one event for the topmost moved folder. Redundant with any
+    // cascaded per-file events Obsidian might ALSO fire for the same
+    // path: harmless, since handleLocalRename/the queue's same-path
+    // coalescing (engine.ts) absorb a repeat call for the same rename
+    // cleanly.
+    if (file instanceof TFolder) {
+      const oldPrefix = `${oldPath}/`;
+      const newPrefix = `${file.path}/`;
+      for (const child of this.app.vault.getFiles()) {
+        if (!child.path.startsWith(newPrefix)) continue;
+        this.onVaultRename(child, oldPrefix + child.path.slice(newPrefix.length));
+      }
+      return;
+    }
+    if (!(file instanceof TFile)) return;
 
     // An earlier modify/create event on this same file could still have a
     // debounce pending under its old path - left alone, it would later
