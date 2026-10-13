@@ -296,6 +296,7 @@ export class SynoraSettingTab extends PluginSettingTab {
       const usage = await this.plugin.api.getUsage();
       if (usage.plan === "free") {
         text += ` · ${formatBytes(usage.usedBytes)} of ${formatBytes(usage.limitBytes)} used`;
+        text += ` · ${usage.deviceCount} of ${usage.deviceLimit} device${usage.deviceLimit === 1 ? "" : "s"}`;
       }
     } catch {
       // Usage is a nice-to-have on top of the sync status above, which

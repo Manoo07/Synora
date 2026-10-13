@@ -1,7 +1,7 @@
 import { beforeEach, afterAll, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { app } from "../src/index.js";
-import { users } from "../src/db/schema.js";
+import { users, devices } from "../src/db/schema.js";
 import { resetDb, testBindings, closeTestDb } from "./setup.js";
 import { registerUser } from "./helpers.js";
 
@@ -161,5 +161,45 @@ describe("auth", () => {
 
     expect(succeeded).toHaveLength(limit);
     expect(rateLimited).toHaveLength(attempts.length - limit);
+  });
+
+  it("rejects a brand-new device once the account's device limit is reached", async () => {
+    const bindings = testBindings();
+    const alice = await registerUser(bindings, "alice@example.com"); // device 1 (active)
+    // The real default is set high (10) since device count isn't an
+    // actual cost driver, unlike storage - set a tiny limit directly so
+    // this test proves the enforcement mechanism itself works,
+    // independent of whatever the default happens to be.
+    await bindings.DB.update(users).set({ deviceLimit: 2 }).where(eq(users.email, "alice@example.com"));
+
+    const login = (devicePublicKey: string) =>
+      app.request(
+        "/v1/auth/login",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ email: "alice@example.com", password: "password123", devicePublicKey }),
+        },
+        bindings,
+      );
+
+    // Limit is 2 - device 2 (pending) still fits.
+    const second = await login("device-2-key");
+    expect(second.status).toBe(200);
+
+    // Device 3 doesn't - the limit is full of non-revoked devices.
+    const third = await login("device-3-key");
+    expect(third.status).toBe(402);
+    expect((await third.json()) as { error: string }).toMatchObject({ error: "device_limit_exceeded" });
+
+    // Revoking device 2 frees its slot - a new device now fits again.
+    const [user] = await bindings.DB.select().from(users).where(eq(users.email, "alice@example.com"));
+    const [deviceTwo] = await bindings.DB.select()
+      .from(devices)
+      .where(and(eq(devices.userId, user!.id), eq(devices.publicKey, "device-2-key")));
+    await bindings.DB.update(devices).set({ status: "revoked" }).where(eq(devices.id, deviceTwo!.id));
+
+    const fourth = await login("device-4-key");
+    expect(fourth.status).toBe(200);
   });
 });

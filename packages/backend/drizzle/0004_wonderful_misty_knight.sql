@@ -1,0 +1,1 @@
+ALTER TABLE "users" ALTER COLUMN "device_limit" SET DEFAULT 10;

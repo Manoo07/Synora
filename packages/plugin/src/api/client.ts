@@ -229,6 +229,12 @@ export class SynoraApiClient {
   }
 
   getUsage() {
-    return this.request<{ plan: "free" | "paid"; usedBytes: number; limitBytes: number }>("/v1/account/usage");
+    return this.request<{
+      plan: "free" | "paid";
+      usedBytes: number;
+      limitBytes: number;
+      deviceCount: number;
+      deviceLimit: number;
+    }>("/v1/account/usage");
   }
 }

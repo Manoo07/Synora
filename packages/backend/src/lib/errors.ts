@@ -13,3 +13,5 @@ export const payloadTooLarge = (message = "Payload too large") => new HttpError(
 export const quotaExceeded = (message = "Storage quota exceeded") => new HttpError(402, "quota_exceeded", message);
 export const serviceUnavailable = (message = "Service unavailable") => new HttpError(503, "service_unavailable", message);
 export const tooManyRequests = (message = "Too many requests") => new HttpError(429, "too_many_requests", message);
+export const deviceLimitExceeded = (message = "Device limit reached for this plan") =>
+  new HttpError(402, "device_limit_exceeded", message);

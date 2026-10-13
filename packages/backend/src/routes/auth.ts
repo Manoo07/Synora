@@ -1,12 +1,12 @@
 import { Hono } from "hono";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { AppEnv } from "../context.js";
 import { users, devices } from "../db/schema.js";
 import { hashPassword, verifyPassword } from "../auth/password.js";
 import { issueAccessToken } from "../auth/jwt.js";
 import { checkRateLimit } from "../auth/rate-limit.js";
-import { badRequest, unauthorized, serviceUnavailable, tooManyRequests } from "../lib/errors.js";
+import { badRequest, unauthorized, serviceUnavailable, tooManyRequests, deviceLimitExceeded } from "../lib/errors.js";
 
 export const authRoutes = new Hono<AppEnv>();
 
@@ -92,6 +92,16 @@ authRoutes.post("/login", async (c) => {
     .limit(1);
 
   if (!device) {
+    // Revoked devices free their slot back up - only active/pending ones
+    // count against the plan's device limit.
+    const deviceCountRows = await c.env.DB.select({ deviceCount: sql<string>`count(*)` })
+      .from(devices)
+      .where(and(eq(devices.userId, user.id), ne(devices.status, "revoked")));
+    const deviceCount = Number(deviceCountRows[0]?.deviceCount ?? 0);
+    if (deviceCount >= user.deviceLimit) {
+      throw deviceLimitExceeded(`This account is limited to ${user.deviceLimit} device(s) on its current plan.`);
+    }
+
     // First time we've seen this device's public key for this account.
     // It still gets an account-level token (below) - that's enough to
     // list vaults and attempt recovery, but every sync/device-management

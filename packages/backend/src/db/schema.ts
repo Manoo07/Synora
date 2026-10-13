@@ -24,6 +24,15 @@ export const users = pgTable("users", {
   plan: text("plan", { enum: ["free", "paid"] }).notNull().default("free"),
   storageLimitBytes: bigint("storage_limit_bytes", { mode: "number" }).notNull().default(250 * 1024 * 1024),
   storageBytesUsed: bigint("storage_bytes_used", { mode: "number" }).notNull().default(0),
+  // Counts devices with status != "revoked" (a revoked device frees its
+  // slot back up). Checked only when a login sees a brand-new device
+  // public key for this account - see routes/auth.ts. Unlike the storage
+  // quota/global ceiling above, a device count isn't a real cost driver
+  // (no meaningful extra R2/Postgres/Workers cost per device) - this is
+  // pure pricing-tier groundwork, so the default is set high enough to
+  // never realistically block real usage before there's an actual paid
+  // tier to raise it for.
+  deviceLimit: integer("device_limit").notNull().default(10),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({
   emailIdx: uniqueIndex("users_email_idx").on(t.email),
