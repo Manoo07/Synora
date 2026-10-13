@@ -108,8 +108,11 @@ Community Plugin directory — it's distributed via GitHub releases):
 3. BRAT installs the latest tagged release automatically, on both desktop
    and mobile
 
-**Cutting a release** (after bumping `version` in `manifest.json` and
-adding the matching entry to `versions.json`):
+**Cutting a release** (after bumping `version` in `packages/plugin/manifest.json`,
+copying that same change to the root-level `manifest.json` — BRAT's
+first-time "Add beta plugin" check requires one there, separate from the
+real one used to build/release — and adding the matching entry to
+`versions.json`):
 
 ```sh
 npm run build
