@@ -8,6 +8,20 @@
       "when": 1791789615048,
       "tag": "0000_modern_sunfire",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1791876027473,
+      "tag": "0001_dapper_bastion",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791877810614,
+      "tag": "0002_tiresome_nuke",
+      "breakpoints": true
     }
   ]
 }

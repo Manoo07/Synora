@@ -16,6 +16,14 @@ export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
   email: text("email").notNull(),
   passwordHash: text("password_hash").notNull(),
+  // Storage quota bookkeeping. storageBytesUsed is a running total
+  // maintained by the commit path (sync.ts), not computed on the fly -
+  // summing storage_objects on every commit would get slower as history
+  // grows, and it's never pruned today (every version, including
+  // superseded ones, stays in storage_objects forever).
+  plan: text("plan", { enum: ["free", "paid"] }).notNull().default("free"),
+  storageLimitBytes: bigint("storage_limit_bytes", { mode: "number" }).notNull().default(250 * 1024 * 1024),
+  storageBytesUsed: bigint("storage_bytes_used", { mode: "number" }).notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({
   emailIdx: uniqueIndex("users_email_idx").on(t.email),
@@ -101,6 +109,21 @@ export const deviceCursors = pgTable("device_cursors", {
 }, (t) => ({
   pk: uniqueIndex("device_cursors_pk").on(t.deviceId, t.vaultId),
 }));
+
+// --- Rate limiting -------------------------------------------------------
+
+// Fixed-window counter, serialized per key via pg_advisory_xact_lock in
+// auth/rate-limit.ts - the same technique already used for conditional
+// commits (routes/sync.ts). A prior KV-based counter and Cloudflare's
+// native rate-limit binding were both tried and confirmed live to not
+// actually enforce anything under concurrent requests (no atomicity
+// between reading and writing the count). This table, guarded by the
+// advisory lock, is genuinely atomic.
+export const rateLimitCounters = pgTable("rate_limit_counters", {
+  key: text("key").primaryKey(),
+  windowStart: timestamp("window_start", { withTimezone: true }).notNull(),
+  count: integer("count").notNull().default(1),
+});
 
 // --- Storage and key distribution ---------------------------------------
 

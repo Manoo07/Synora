@@ -6,12 +6,14 @@ import { HttpError } from "./lib/errors.js";
 import { authRoutes } from "./routes/auth.js";
 import { vaultRoutes } from "./routes/vaults.js";
 import { syncRoutes } from "./routes/sync.js";
+import { accountRoutes } from "./routes/account.js";
 
 export const app = new Hono<AppEnv>();
 
 app.route("/v1/auth", authRoutes);
 app.route("/v1/vaults", vaultRoutes);
 app.route("/v1/vaults", syncRoutes);
+app.route("/v1/account", accountRoutes);
 
 app.get("/healthz", (c) => c.json({ ok: true }));
 
@@ -37,6 +39,7 @@ interface WorkerBindings {
   HYPERDRIVE: { connectionString: string };
   BUCKET: AppBindings["BUCKET"];
   JWT_SECRET: string;
+  GLOBAL_STORAGE_CEILING_BYTES: string;
 }
 
 export default {
@@ -46,6 +49,7 @@ export default {
       DB: db,
       BUCKET: env.BUCKET,
       JWT_SECRET: env.JWT_SECRET,
+      GLOBAL_STORAGE_CEILING_BYTES: Number(env.GLOBAL_STORAGE_CEILING_BYTES),
     };
     try {
       return await app.fetch(request, bindings, ctx);

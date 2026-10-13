@@ -19,10 +19,17 @@ localConnectionString = "postgres://synora:synora@localhost:5435/synora"
 # JWT_SECRET is set as a real secret (`wrangler secret put JWT_SECRET`),
 # not a [vars] entry - a binding can't be both.
 
-# Rate limiting on /v1/auth/register and /v1/auth/login is NOT done here
-# in code - two different in-Worker approaches (a KV counter, then the
-# `[[unsafe.bindings]]` ratelimit type) were both tried and confirmed
-# live to silently let every request through regardless of volume. It's
-# configured instead as a Cloudflare dashboard WAF Rate Limiting Rule
-# (Security -> WAF -> Rate limiting rules), which enforces at the edge
-# before the request reaches this Worker at all - see README.md.
+# 80% of Cloudflare's free-tier R2 storage allowance (10GB) - leaves
+# headroom so a burst of signups can never push past the free tier before
+# there's a billing story. See context.ts GLOBAL_STORAGE_CEILING_BYTES and
+# routes/auth.ts.
+[vars]
+GLOBAL_STORAGE_CEILING_BYTES = 8000000000
+
+# Rate limiting on /v1/auth/register and /v1/auth/login is implemented in
+# code (src/auth/rate-limit.ts), serialized per-IP via a Postgres advisory
+# lock - no extra binding needed here. Two earlier in-Worker approaches (a
+# KV counter, then the `[[unsafe.bindings]]` ratelimit type) were both
+# confirmed live to silently let every request through under concurrent
+# load; this one is covered by a concurrency test (test/auth.test.ts)
+# that proves it actually blocks.

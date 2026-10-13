@@ -1,5 +1,7 @@
 import { beforeEach, afterAll, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
 import { app } from "../src/index.js";
+import { users } from "../src/db/schema.js";
 import { resetDb, testBindings, closeTestDb } from "./setup.js";
 import { registerUser, createVault, requestUpload, putBlob, commit } from "./helpers.js";
 
@@ -220,5 +222,45 @@ describe("sync protocol", () => {
       bindings,
     );
     expect(res.status).toBe(413);
+  });
+
+  it("rejects a commit that would push a free account over its storage quota", async () => {
+    const bindings = testBindings();
+    const alice = await registerUser(bindings, "alice@example.com");
+    const vault = await createVault(bindings, alice.accessToken);
+    await bindings.DB.update(users).set({ storageLimitBytes: 20 }).where(eq(users.email, "alice@example.com"));
+
+    const upload1 = await requestUpload(bindings, alice.accessToken, vault.id);
+    const blob1 = await putBlob(bindings, alice.accessToken, upload1.uploadUrl, "under the limit");
+    const first = await commit(bindings, alice.accessToken, vault.id, {
+      blobKey: blob1.blobKey,
+      ciphertextHash: blob1.ciphertextHash,
+      sizeBytes: blob1.sizeBytes,
+      operation: "created",
+      idempotencyKey: "op-1",
+    });
+    expect(first.status).toBe(200);
+
+    const [userAfterFirst] = await bindings.DB.select().from(users).where(eq(users.email, "alice@example.com"));
+    expect(userAfterFirst!.storageBytesUsed).toBe(blob1.sizeBytes);
+
+    const upload2 = await requestUpload(bindings, alice.accessToken, vault.id);
+    const blob2 = await putBlob(bindings, alice.accessToken, upload2.uploadUrl, "this one pushes it over the limit");
+    const second = await commit(bindings, alice.accessToken, vault.id, {
+      fileId: first.body.fileId,
+      baseVersionId: first.body.versionId,
+      blobKey: blob2.blobKey,
+      ciphertextHash: blob2.ciphertextHash,
+      sizeBytes: blob2.sizeBytes,
+      operation: "updated",
+      idempotencyKey: "op-2",
+    });
+    expect(second.status).toBe(402);
+    expect(second.body.error).toBe("quota_exceeded");
+
+    // The rejected commit must not have been counted - usage stays exactly
+    // where it was after the first, successful commit.
+    const [userAfterSecond] = await bindings.DB.select().from(users).where(eq(users.email, "alice@example.com"));
+    expect(userAfterSecond!.storageBytesUsed).toBe(blob1.sizeBytes);
   });
 });

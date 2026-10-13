@@ -1,155 +1,110 @@
 # Synora
 
-Synora is a self-hosted, end-to-end encrypted sync service for Obsidian
-vaults. Obsidian stays the editor you already use, on every device; Synora
-is the backend that keeps your notes in sync between them — without ever
-being able to read the notes themselves.
+Synora keeps your Obsidian vault in sync across devices — laptop, phone,
+anywhere you use Obsidian — without any third-party service ever being able
+to read your notes. You run your own backend (free, on Cloudflare), install
+one plugin, and your devices stay in sync automatically in the background.
 
-The idea: your laptop and your phone each encrypt their own edits before
-anything leaves the device, upload the ciphertext to your own Cloudflare
-account, and pull down whatever other devices have uploaded. The server
-coordinates *which version is current* and *resolves conflicts* — it never
-sees plaintext content, filenames, or folder paths.
+## What you need
 
-## How it works
+- An Obsidian vault (desktop and/or mobile)
+- A free [Cloudflare](https://dash.cloudflare.com/sign-up) account
+- A free Postgres database (e.g. [Aiven](https://aiven.io/) or
+  [Neon](https://neon.tech) have free tiers) — only needed once, during setup
+- [Node.js](https://nodejs.org) and the [GitHub CLI](https://cli.github.com/)
+  installed on the machine you're setting this up from
 
-- **Client-side encryption.** Every note and attachment is encrypted
-  (XChaCha20-Poly1305) on-device before upload, using a vault key that's
-  generated locally and never sent to the server in the clear.
-- **Conflict-safe versioning.** Each file is a chain of immutable, ordered
-  versions. A device committing against a stale version is rejected
-  (checked transactionally, race-condition-safe) rather than silently
-  overwritten — see [docs/protocol-spec.md](docs/protocol-spec.md) for
-  the exact wire protocol.
-- **Automatic merging.** Two devices editing different parts of the same
-  note merge automatically (three-way text merge); genuinely overlapping
-  edits are preserved as a conflict copy instead of picking a winner.
-- **Device trust, not device-to-device connections.** Every device syncs
-  independently with the server on an interval — your phone doesn't need
-  your laptop to be online, or vice versa.
-- **Recovery without a password reset.** Losing every trusted device
-  doesn't lock you out: a one-time recovery code, shown once when a vault
-  is created, lets a brand-new device regain access on its own.
+## Setup guide
 
-### Architecture
+### 1. Deploy your own backend
 
-```
-Obsidian (laptop) ──┐                      ┌── R2 (encrypted blobs)
-                     ├── Cloudflare Worker ─┤
-Obsidian (phone)  ───┘    (Hono API)        └── Postgres (versions, devices)
-```
-
-- **`packages/backend`** — the sync API. Cloudflare Workers + Hono,
-  Postgres (via Hyperdrive) for metadata/version history/device records,
-  R2 for the encrypted file blobs themselves.
-- **`packages/plugin`** — the Obsidian plugin. Generates and manages keys,
-  encrypts/decrypts on-device, runs the local sync queue, and talks to the
-  backend. Works on desktop and mobile.
-
-Nothing server-side — not the database, not R2, not the people operating
-the Cloudflare account — can read vault content. See
-[docs/protocol-spec.md](docs/protocol-spec.md) for the full threat model
-and wire protocol.
-
-## Running your own instance
-
-### 1. Backend
+This is a one-time setup. You're deploying your own private copy of the
+Synora server to your own Cloudflare account — nobody else can see or use it.
 
 ```sh
 cd packages/backend
 npm install
 
-# Local development
-docker compose up -d        # local Postgres on :5435
-npm run db:generate         # generate SQL migration from schema.ts
-npm run db:migrate          # apply it (DATABASE_URL from .env, see below)
-npm test                    # run the test suite
-npm run dev                 # wrangler dev, http://localhost:8787
+npx wrangler login
+npx wrangler r2 bucket create <pick-a-bucket-name>
+npx wrangler hyperdrive create <pick-a-name> --connection-string="<your-postgres-connection-string>"
 ```
 
-Create `packages/backend/.env` (gitignored) with your Postgres connection
-string for local migrations:
-
-```
-DATABASE_URL=postgres://user:pass@host:port/db
-```
-
-**Deploying to production:**
+Open `wrangler.toml` and update `r2_buckets.bucket_name` and
+`hyperdrive.id` to match what the two commands above printed. Then:
 
 ```sh
-wrangler login
-wrangler r2 bucket create <your-bucket-name>
-wrangler hyperdrive create <name> --connection-string="<your-postgres-url>"
-# update wrangler.toml's r2_buckets.bucket_name and hyperdrive.id to match
-wrangler secret put JWT_SECRET     # paste a long random value
-DATABASE_URL=<your-postgres-url> npm run db:migrate
-wrangler deploy
+npx wrangler secret put JWT_SECRET      # paste any long random string
+DATABASE_URL=<your-postgres-connection-string> npm run db:migrate
+npx wrangler deploy
 ```
 
-A GitHub Actions workflow (`.github/workflows/keep-db-alive.yml`) pings the
-database every 12 hours so a free-tier Postgres instance isn't auto-paused
-for inactivity — set the `DATABASE_URL` repository secret for it to run.
+The last command prints your server's URL, something like
+`https://synora-backend.<your-name>.workers.dev`. Save it — you'll enter it
+into the plugin in step 3.
 
-### 2. Obsidian plugin
+If your Postgres provider auto-pauses idle databases on its free tier, set
+up the included GitHub Actions workflow
+(`.github/workflows/keep-db-alive.yml`) by adding a `DATABASE_URL`
+repository secret — it pings the database every 12 hours to keep it awake.
 
-```sh
-cd packages/plugin
-npm install
-npm test                    # crypto, queue, merge, and sync engine tests
-npm run build                # type-checks and bundles to main.js
-```
+### 2. Install the plugin
 
-**Installing it in Obsidian** (the plugin isn't published to the official
-Community Plugin directory — it's distributed via GitHub releases):
+Synora isn't on the official Community Plugins list (yet), so it installs
+through [BRAT](https://github.com/TfTHacker/obsidian42-brat), a plugin that
+installs other plugins directly from GitHub:
 
-1. In Obsidian: Settings → Community plugins → Browse → install **BRAT**
-2. In BRAT's settings → "Add beta plugin" → enter this repo
-   (`Manoo07/Synora`)
-3. BRAT installs the latest tagged release automatically, on both desktop
-   and mobile
+1. In Obsidian: **Settings → Community plugins → Browse** → install **BRAT**
+2. In BRAT's settings → **Add beta plugin** → enter `Manoo07/Synora`
+3. BRAT installs the latest release — do this on every device you want to
+   sync (desktop and mobile both work)
 
-**Cutting a release** (after bumping `version` in `packages/plugin/manifest.json`,
-copying that same change to the root-level `manifest.json` — BRAT's
-first-time "Add beta plugin" check requires one there, separate from the
-real one used to build/release — and adding the matching entry to
-`versions.json`):
+### 3. Connect your first device
 
-```sh
-npm run build
-git tag -a X.Y.Z -m "Synora Sync plugin vX.Y.Z"
-git push origin X.Y.Z
-gh release create X.Y.Z manifest.json main.js --title "Synora Sync X.Y.Z" --notes "..."
-```
+1. Open **Settings → Synora Sync**
+2. Set **Server URL** to the URL from step 1
+3. Register an account (your email + a password)
+4. **Create a vault** — this shows you a one-time **recovery code**. Save it
+   somewhere safe (a password manager is ideal). It's the only way to add a
+   new device if you ever lose access to all your existing ones.
 
-**First-time setup inside Obsidian:** open the plugin's settings, set the
-Server URL to your deployed Worker, register an account, create a vault
-(save the one-time recovery code it shows you), then on each additional
-device use "Recover vault access" with that same code to join it.
+### 4. Connect every other device
+
+On each additional device, install the plugin the same way (step 2), then
+in **Settings → Synora Sync**:
+
+- If it's a brand new device: sign in, then **Recover vault access** using
+  the recovery code from step 3.
+- If this device already synced with this vault before (e.g. you
+  disconnected and reconnected it): it'll show up under **"This device
+  already has access to"** — just tap **Attach**, no recovery code needed.
+
+## Using it
+
+Once connected, sync runs automatically in the background on an interval —
+there's nothing to click. Edit a note on your phone, it shows up on your
+laptop within a sync cycle, and vice versa. Your laptop doesn't need to be
+open for your phone to sync, or the other way around.
+
+- Two devices editing **different parts** of the same note merge
+  automatically.
+- Two devices editing the **same part** of a note at the same time keep
+  both versions — your edit is saved as a `(conflict)` copy next to the
+  original, so nothing is ever silently lost.
+- A small status indicator in the plugin settings shows whether everything
+  is fully synced or if changes are still pending.
 
 ## Status
 
-- **Backend**: deployed and live-tested end-to-end (register → create
-  vault → upload → commit → download, and the full recovery flow).
-- **Plugin**: installable via BRAT on both desktop and mobile; crypto,
-  sync queue, conflict engine, and merge logic have test coverage.
-- **Not built yet**: the official Community Plugin directory listing, a
-  private web workspace, and web-based editing (these are later-phase
-  ideas from the original design, not in progress).
+- Live and working day-to-day across desktop and Android.
+- Not on the official Community Plugins list — install via BRAT (above).
+- Not built yet: a web-based editor, multi-vault management in one view.
 
 ## Known limitations
 
-- **No rate limiting on `/v1/auth/register` or `/v1/auth/login`.** Two
-  in-Worker approaches (a KV counter, then Cloudflare's native Rate
-  Limiting binding) were tried and both confirmed live to not actually
-  enforce anything under rapid-fire requests. The reliable fix - a
-  dashboard WAF Rate Limiting Rule, or a Durable Object-backed counter -
-  needs either a custom domain routed through Cloudflare's zone-level WAF
-  or the Workers Paid plan (Durable Objects aren't available on the free
-  plan). Deliberately left unfixed for now: the backend URL isn't public,
-  and the bigger cost risk (unbounded upload size) is already capped at
-  100MB/request in `routes/sync.ts`.
-- **Uploads are authenticated but otherwise uncapped in count** - a
-  compromised or malicious account could still upload many files within
-  the 100MB-each limit. Not a concern at the current single-account
-  scale; would need a per-account storage quota before onboarding anyone
-  else.
+- **Storage is capped, not metered or billed.** Each account gets a free
+  250MB storage allowance (shown as a usage line in the plugin settings),
+  and a global ceiling (`GLOBAL_STORAGE_CEILING_BYTES` in `wrangler.toml`,
+  defaulting to 8GB — 80% of Cloudflare's free R2 tier) stops new signups
+  before total usage could run up a real bill. There's no paid tier or
+  billing integration yet — every account is free until that's built.

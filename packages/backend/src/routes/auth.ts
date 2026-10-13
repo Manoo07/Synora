@@ -1,22 +1,26 @@
 import { Hono } from "hono";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { AppEnv } from "../context.js";
 import { users, devices } from "../db/schema.js";
 import { hashPassword, verifyPassword } from "../auth/password.js";
 import { issueAccessToken } from "../auth/jwt.js";
-import { badRequest, unauthorized } from "../lib/errors.js";
+import { checkRateLimit } from "../auth/rate-limit.js";
+import { badRequest, unauthorized, serviceUnavailable, tooManyRequests } from "../lib/errors.js";
 
 export const authRoutes = new Hono<AppEnv>();
 
-// Rate limiting for these two endpoints (the only ones a stranger can
-// call with no account at all) is deliberately NOT done here in Worker
-// code - two different approaches were tried and confirmed live to not
-// actually enforce anything (a KV counter, eventually-consistent so it
-// let bursts straight through; then the `[[unsafe.bindings]]` ratelimit
-// type, which accepted the config but never blocked a single request).
-// It's a Cloudflare dashboard WAF Rate Limiting Rule instead - see
-// README.md "Running your own instance" for the exact rule to create.
+// A prior KV-based counter and Cloudflare's native rate-limit binding were
+// both tried here and confirmed live to not actually enforce anything
+// under concurrent requests - neither had real atomicity between reading
+// the current count and writing the incremented one back, so a burst of
+// simultaneous requests all read the same stale count and all passed.
+// checkRateLimit serializes per key via a Postgres advisory lock (the
+// same technique the commit protocol already relies on) - see
+// auth/rate-limit.ts.
+function clientIp(c: { req: { header(name: string): string | undefined } }): string {
+  return c.req.header("cf-connecting-ip") ?? "unknown";
+}
 
 const registerSchema = z.object({
   email: z.string().email(),
@@ -29,10 +33,27 @@ const registerSchema = z.object({
 // no other device to approve it against yet. Every subsequent device must
 // go through POST /vaults/:vaultId/devices enrollment instead.
 authRoutes.post("/register", async (c) => {
+  // 5 registrations per IP per 5 minutes - generous for a real new user,
+  // tight enough to blunt an automated signup flood.
+  if (!(await checkRateLimit(c.env.DB, `register:${clientIp(c)}`, 5, 300))) {
+    throw tooManyRequests("Too many registration attempts. Try again in a few minutes.");
+  }
+
   const body = registerSchema.parse(await c.req.json());
 
   const existing = await c.env.DB.select().from(users).where(eq(users.email, body.email)).limit(1);
   if (existing.length > 0) throw badRequest("Email already registered");
+
+  // Blocks only *new* signups once total usage nears the operator's
+  // Cloudflare free-tier R2 allowance - never affects existing accounts'
+  // syncing. See context.ts GLOBAL_STORAGE_CEILING_BYTES.
+  const usageRows = await c.env.DB.select({
+    totalUsed: sql<string>`coalesce(sum(${users.storageBytesUsed}), 0)`,
+  }).from(users);
+  const totalUsed = Number(usageRows[0]?.totalUsed ?? 0);
+  if (totalUsed >= c.env.GLOBAL_STORAGE_CEILING_BYTES) {
+    throw serviceUnavailable("Synora isn't accepting new accounts right now - check back soon.");
+  }
 
   const passwordHash = await hashPassword(body.password);
   const [user] = await c.env.DB.insert(users).values({ email: body.email, passwordHash }).returning();
@@ -52,6 +73,12 @@ const loginSchema = z.object({
 });
 
 authRoutes.post("/login", async (c) => {
+  // 10 attempts per IP per minute - enough for a real person mistyping a
+  // password, tight enough to blunt credential stuffing / brute force.
+  if (!(await checkRateLimit(c.env.DB, `login:${clientIp(c)}`, 10, 60))) {
+    throw tooManyRequests("Too many login attempts. Try again in a minute.");
+  }
+
   const body = loginSchema.parse(await c.req.json());
 
   const [user] = await c.env.DB.select().from(users).where(eq(users.email, body.email)).limit(1);

@@ -2,9 +2,9 @@ import { Hono } from "hono";
 import { eq, and, gt, sql, desc } from "drizzle-orm";
 import { z } from "zod";
 import type { AppEnv } from "../context.js";
-import { files, fileVersions, changeEvents, deviceCursors, storageObjects } from "../db/schema.js";
+import { files, fileVersions, changeEvents, deviceCursors, storageObjects, vaults, users } from "../db/schema.js";
 import { requireAuth, requireVaultAccess } from "../auth/middleware.js";
-import { badRequest, conflict, notFound, payloadTooLarge } from "../lib/errors.js";
+import { badRequest, conflict, notFound, payloadTooLarge, quotaExceeded } from "../lib/errors.js";
 
 export const syncRoutes = new Hono<AppEnv>();
 syncRoutes.use("*", requireAuth);
@@ -101,6 +101,19 @@ syncRoutes.post("/:vaultId/commits", async (c) => {
       };
     }
 
+    const [owner] = await tx
+      .select({ id: users.id, plan: users.plan, storageLimitBytes: users.storageLimitBytes, storageBytesUsed: users.storageBytesUsed })
+      .from(vaults)
+      .innerJoin(users, eq(users.id, vaults.ownerId))
+      .where(eq(vaults.id, vaultId))
+      .limit(1);
+    if (!owner) throw notFound("Vault not found");
+    if (owner.plan === "free" && owner.storageBytesUsed + body.sizeBytes > owner.storageLimitBytes) {
+      throw quotaExceeded(
+        `This account's free ${Math.round(owner.storageLimitBytes / (1024 * 1024))}MB storage limit is used up.`,
+      );
+    }
+
     let fileId = body.fileId;
     if (fileId) {
       const [file] = await tx.select().from(files).where(and(eq(files.id, fileId), eq(files.vaultId, vaultId))).limit(1);
@@ -163,6 +176,11 @@ syncRoutes.post("/:vaultId/commits", async (c) => {
       sizeBytes: body.sizeBytes,
       vaultId,
     });
+
+    await tx
+      .update(users)
+      .set({ storageBytesUsed: sql`${users.storageBytesUsed} + ${body.sizeBytes}` })
+      .where(eq(users.id, owner.id));
 
     return { status: "committed" as const, fileId, versionId: version!.id, sequence: nextSequence };
   });

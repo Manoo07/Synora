@@ -10,3 +10,6 @@ export const notFound = (message = "Not found") => new HttpError(404, "not_found
 export const conflict = (message: string) => new HttpError(409, "conflict", message);
 export const badRequest = (message: string) => new HttpError(400, "bad_request", message);
 export const payloadTooLarge = (message = "Payload too large") => new HttpError(413, "payload_too_large", message);
+export const quotaExceeded = (message = "Storage quota exceeded") => new HttpError(402, "quota_exceeded", message);
+export const serviceUnavailable = (message = "Service unavailable") => new HttpError(503, "service_unavailable", message);
+export const tooManyRequests = (message = "Too many requests") => new HttpError(429, "too_many_requests", message);

@@ -23,7 +23,8 @@ export async function resetDb() {
   await testDb().execute(
     `truncate table
       wrapped_vault_keys, storage_objects, device_cursors, change_events,
-      file_versions, files, vault_members, devices, vaults, users
+      file_versions, files, vault_members, devices, vaults, users,
+      rate_limit_counters
      restart identity cascade` as never,
   );
 }
@@ -33,6 +34,7 @@ export function testBindings(overrides: Partial<AppBindings> = {}): AppBindings 
     DB: testDb(),
     BUCKET: new MemoryBucket(),
     JWT_SECRET: "test-secret",
+    GLOBAL_STORAGE_CEILING_BYTES: 8_000_000_000,
     ...overrides,
   };
 }

@@ -9,6 +9,12 @@ export interface AppBindings {
   DB: Db;
   BUCKET: BlobBucket;
   JWT_SECRET: string;
+  // Sum of every account's storageBytesUsed must stay under this before a
+  // *new* signup is allowed - protects the operator's Cloudflare free-tier
+  // R2 allowance from being run up by a wave of signups before there's a
+  // billing story in place. Existing accounts' syncing is never affected
+  // by this - see routes/auth.ts.
+  GLOBAL_STORAGE_CEILING_BYTES: number;
 }
 
 export interface AppVariables {
