@@ -319,6 +319,47 @@ export default class SynoraPlugin extends Plugin {
     new Notice("Disconnected from vault. Pick Recover vault access to reattach to the right one.");
   }
 
+  // Vaults this device can attach to directly - no recovery code needed,
+  // because the server already has a device-specific grant for it (from
+  // an earlier successful recovery/enrollment this device's local
+  // settings have since lost track of). Includes each vault's latest
+  // change sequence so the UI can show which ones actually have content,
+  // rather than the user guessing between several opaque vault ids -
+  // exactly the ambiguity that led to repeatedly recreating empty vaults
+  // instead of reattaching to the real one, confirmed live (one device
+  // ended up with three separate grants this way).
+  async listAccessibleVaults(): Promise<Array<{ id: string; latestSequence: number }>> {
+    const vaults = await this.api.listVaults();
+    const accessible: Array<{ id: string; latestSequence: number }> = [];
+    for (const vault of vaults) {
+      try {
+        await this.api.getWrappedKey(vault.id);
+      } catch {
+        continue; // no grant for this vault - not an option here
+      }
+      const status = await this.api.status(vault.id).catch(() => ({ latestSequence: 0 }));
+      accessible.push({ id: vault.id, latestSequence: status.latestSequence });
+    }
+    return accessible;
+  }
+
+  async attachToVault(vaultId: string): Promise<void> {
+    if (!this.settings.deviceSecretKeyB64) throw new Error("No device key pair on this device yet.");
+    const { wrappedKey } = await this.api.getWrappedKey(vaultId);
+    const vaultKey = unwrapVaultKey(base64ToBytes(wrappedKey), base64ToBytes(this.settings.deviceSecretKeyB64));
+
+    this.settings.vaultId = vaultId;
+    await this.saveSettings();
+    this.vaultKey = vaultKey;
+    this.needsVaultKeyRecovery = false;
+    new Notice("Attached to vault. Pulling files…");
+
+    const raw = ((await this.loadData()) as Record<string, unknown>) ?? {};
+    await this.initEngine(new PluginDataStore(this, raw));
+    await this.engine?.pull();
+    new Notice("Files pulled.");
+  }
+
   async approveDevice(deviceId: string, devicePublicKeyB64: string): Promise<void> {
     if (deviceId === this.settings.deviceId) {
       new Notice("This is the current device - it can't approve itself. Use Recover vault access instead.");

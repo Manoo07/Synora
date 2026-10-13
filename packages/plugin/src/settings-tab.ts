@@ -171,32 +171,56 @@ export class SynoraSettingTab extends PluginSettingTab {
       // account" - a device that's never been recovered looks identical
       // to a genuinely fresh account otherwise, and would happily create
       // a second, separate, empty vault instead of joining the real one.
-      // Confirmed live: exactly this, on a new phone.
-      const checkingEl = this.containerEl.createEl("p", { text: "Checking for an existing vault on this account…" });
-      void this.plugin.api
-        .listVaults()
-        .then((vaults) => {
+      // Confirmed live, repeatedly: a device ended up with three separate
+      // empty-vault grants from mis-tapping "Create vault" each time it
+      // meant to reattach, because there was no direct "just use the one
+      // you already have access to" option - only recovery (needs the
+      // code) or create (the actual mis-tap target).
+      const checkingEl = this.containerEl.createEl("p", { text: "Checking this account's vaults…" });
+      void this.plugin
+        .listAccessibleVaults()
+        .then(async (accessible) => {
           checkingEl.remove();
-          if (vaults.length > 0) {
+          if (accessible.length > 0) {
+            this.containerEl.createEl("h3", { text: "This device already has access to" });
             this.containerEl.createEl("p", {
-              text: `This account already has a vault (${vaults[0]!.id}) - this device just isn't attached to it yet. Use "Recover vault access" below with your recovery code rather than creating a new, separate one.`,
+              text: "No recovery code needed - pick the one with real content in it.",
+            });
+            for (const vault of accessible) {
+              new Setting(this.containerEl)
+                .setName(vault.id)
+                .setDesc(vault.latestSequence > 0 ? `${vault.latestSequence} synced change(s)` : "Empty")
+                .addButton((btn) =>
+                  btn
+                    .setButtonText("Attach")
+                    .setCta()
+                    .onClick(() => void this.runBusy(btn, "Attaching...", () => this.plugin.attachToVault(vault.id))),
+                );
+            }
+          }
+
+          const vaults = await this.plugin.api.listVaults();
+          const foundExisting = vaults.length > 0;
+          if (foundExisting) {
+            this.containerEl.createEl("h3", { text: accessible.length > 0 ? "Or recover a different vault" : "Recover vault access" });
+            this.containerEl.createEl("p", {
+              text: `This account has a vault this device doesn't have direct access to yet. Use the recovery code shown when it was created.`,
             });
             this.renderRecoveryForm();
             this.containerEl.createEl("h3", { text: "Or create a separate vault" });
             this.containerEl.createEl("p", { text: "Only do this if you actually want an unrelated, empty vault." });
           }
-          const foundExisting = vaults.length > 0;
           new Setting(this.containerEl)
             .setName(foundExisting ? "Create a new, separate vault" : "No vault yet")
             .addButton((btn) => {
               btn.setButtonText(foundExisting ? "Create an unrelated empty vault" : "Create vault").onClick(() =>
                 void this.runBusy(btn, "Creating...", () => this.plugin.createVault()),
               );
-              // Only the genuinely-first-vault case gets the prominent
-              // purple styling - when an existing vault was found, this
-              // button sitting right next to "Recover vault" with equal
-              // visual weight is exactly what led to a mis-tap, live.
-              if (!foundExisting) btn.setCta();
+              // Only the genuinely-first-vault-ever case gets the
+              // prominent styling - whenever there's something to attach
+              // to or recover instead, this button sitting at equal
+              // visual weight is exactly what led to repeated mis-taps.
+              if (!foundExisting && accessible.length === 0) btn.setCta();
             });
         })
         .catch(async (err) => {
