@@ -14,6 +14,13 @@ export interface SynoraSettings {
   // see main.ts moveImagesToConfiguredFolder().
   attachmentFolder?: string;
 
+  // Undefined/empty behave the same as false/[] (not paused) - lets
+  // stopping sync, for the whole vault or just specific files, mean
+  // genuinely zero requests rather than just skipping uploads. See
+  // main.ts pauseSync()/pauseFileSync() and syncCycle()'s early return.
+  syncPaused?: boolean;
+  pausedPaths?: string[];
+
   // Populated once signed in. The device secret key never leaves this
   // device by design; it lives here because Obsidian's plugin data file
   // is the only durable local storage available to a plugin. The vault

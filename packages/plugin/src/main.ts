@@ -81,6 +81,10 @@ export default class SynoraPlugin extends Plugin {
     this.statusTextEl = this.statusBarEl.createSpan({ text: "Synora" });
     this.registerDomEvent(this.statusBarEl, "click", () => {
       if (this.isSyncing) return;
+      if (this.settings.syncPaused) {
+        new Notice("Synora: sync is paused. Resume it in settings to sync.");
+        return;
+      }
       if (!this.engine) {
         new Notice("Synora: not connected. Open settings to sign in and attach a vault.");
         return;
@@ -93,6 +97,19 @@ export default class SynoraPlugin extends Plugin {
     this.registerEvent(this.app.vault.on("modify", (f) => this.onVaultEvent(f, "updated")));
     this.registerEvent(this.app.vault.on("delete", (f) => this.onVaultEvent(f, "deleted")));
     this.registerEvent(this.app.vault.on("rename", (f, oldPath) => this.onVaultRename(f, oldPath)));
+
+    this.registerEvent(
+      this.app.workspace.on("file-menu", (menu, file) => {
+        if (!(file instanceof TFile)) return;
+        const paused = this.isPathPaused(file.path);
+        menu.addItem((item) =>
+          item
+            .setTitle(paused ? "Resume Synora sync for this file" : "Pause Synora sync for this file")
+            .setIcon(paused ? "play" : "pause")
+            .onClick(() => void (paused ? this.resumeFileSync(file.path) : this.pauseFileSync(file.path))),
+        );
+      }),
+    );
 
     this.registerInterval(
       window.setInterval(() => void this.syncCycle(), this.settings.syncIntervalSeconds * 1000),
@@ -171,6 +188,7 @@ export default class SynoraPlugin extends Plugin {
   private async handleDebounced(file: TAbstractFile, operation: "created" | "updated" | "deleted"): Promise<void> {
     this.pendingDebounces.delete(file.path);
     if (!this.engine) return;
+    if (this.settings.syncPaused || this.isPathPaused(file.path)) return;
 
     if (operation === "deleted") {
       await this.engine.handleLocalChange(file.path, "deleted");
@@ -215,6 +233,7 @@ export default class SynoraPlugin extends Plugin {
   private async handleDebouncedRename(file: TFile, oldPath: string): Promise<void> {
     this.pendingDebounces.delete(file.path);
     if (!this.engine) return;
+    if (this.settings.syncPaused || this.isPathPaused(file.path)) return;
 
     const current = this.app.vault.getAbstractFileByPath(file.path);
     if (!(current instanceof TFile)) return;
@@ -226,6 +245,10 @@ export default class SynoraPlugin extends Plugin {
   }
 
   async syncCycle(): Promise<void> {
+    // The one line that makes "entire" pause genuinely mean zero
+    // requests - the 30s interval timer keeps firing regardless (cheap,
+    // local-only), it just no-ops immediately every time while paused.
+    if (this.settings.syncPaused) return;
     if (!this.engine || this.isSyncing) return;
     this.isSyncing = true;
     try {
@@ -279,6 +302,14 @@ export default class SynoraPlugin extends Plugin {
     if (!this.statusBarEl || !this.statusIconEl || !this.statusTextEl) return;
     this.statusBarEl.removeClass("is-error", "is-synced");
     this.statusIconEl.removeClass("is-spinning");
+
+    // Overrides whatever state was requested - paused is paused
+    // regardless of what triggered this call.
+    if (this.settings.syncPaused) {
+      setIcon(this.statusIconEl, "pause");
+      this.statusTextEl.setText("Paused");
+      return;
+    }
 
     if (state === "syncing") {
       setIcon(this.statusIconEl, "refresh-cw");
@@ -444,6 +475,7 @@ export default class SynoraPlugin extends Plugin {
     let queued = 0;
     for (const file of files) {
       if (await this.engine.isTracked(file.path)) continue;
+      if (this.isPathPaused(file.path)) continue;
       const content = new Uint8Array(await this.app.vault.readBinary(file));
       await this.engine.handleLocalChange(file.path, "created", content);
       queued++;
@@ -483,6 +515,44 @@ export default class SynoraPlugin extends Plugin {
       `Synora: ${failed.length} edit${failed.length === 1 ? "" : "s"} could not be synced and ${failed.length === 1 ? "was" : "were"} dropped (see console for details) - re-save the file to try again: ${failed.join(", ")}`,
       15_000,
     );
+  }
+
+  isPathPaused(path: string): boolean {
+    return (this.settings.pausedPaths ?? []).includes(path);
+  }
+
+  async pauseSync(): Promise<void> {
+    this.settings.syncPaused = true;
+    await this.saveSettings();
+    void this.updateStatusBar("idle"); // overridden to "Paused" inside updateStatusBar
+  }
+
+  async resumeSync(): Promise<void> {
+    this.settings.syncPaused = false;
+    await this.saveSettings();
+    // The bulk catch-up - don't wait for the next 30s tick.
+    void this.syncCycle();
+  }
+
+  async pauseFileSync(path: string): Promise<void> {
+    const paths = new Set(this.settings.pausedPaths ?? []);
+    paths.add(path);
+    this.settings.pausedPaths = [...paths];
+    await this.saveSettings();
+  }
+
+  async resumeFileSync(path: string): Promise<void> {
+    this.settings.pausedPaths = (this.settings.pausedPaths ?? []).filter((p) => p !== path);
+    await this.saveSettings();
+    // No vault-event listener ever queued this file's edits while it was
+    // paused - catch it up explicitly, then push everything in one bulk
+    // sync rather than waiting for the next tick.
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (file instanceof TFile && this.engine) {
+      const content = new Uint8Array(await this.app.vault.readBinary(file));
+      await this.engine.handleLocalChange(path, "updated", content);
+    }
+    void this.syncCycle();
   }
 
   // Detaches this device from whatever vault it's currently pointed at -

@@ -306,6 +306,39 @@ export class SynoraSettingTab extends PluginSettingTab {
       vaultValue.title = vaultId;
       const syncValue = this.addInfoRow(info, "Sync", "Checking…");
       void this.renderSyncStatus(syncValue, myGeneration);
+
+      new Setting(this.containerEl)
+        .setName("Pause sync")
+        .setDesc(
+          "Stops all background syncing for the whole vault - genuinely zero requests while paused, " +
+            "not just skipped uploads. Turning it back on syncs everything caught up in one go.",
+        )
+        .addToggle((toggle) =>
+          toggle.setValue(this.plugin.settings.syncPaused ?? false).onChange(async (value) => {
+            if (value) await this.plugin.pauseSync();
+            else await this.plugin.resumeSync();
+            this.display();
+          }),
+        );
+
+      const pausedPaths = this.plugin.settings.pausedPaths ?? [];
+      if (pausedPaths.length > 0) {
+        this.containerEl.createEl("p", {
+          text: "Individually paused files (right-click a file to pause/resume just that one):",
+          cls: "synora-muted",
+        });
+        for (const path of pausedPaths) {
+          new Setting(this.containerEl).setName(path).addButton((btn) =>
+            btn.setButtonText("Resume").onClick(() =>
+              void this.runBusy(btn, "Resuming...", async () => {
+                await this.plugin.resumeFileSync(path);
+                this.display();
+              }),
+            ),
+          );
+        }
+      }
+
       new Setting(this.containerEl)
         .setName("Wrong vault?")
         .setDesc(
