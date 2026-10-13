@@ -172,7 +172,13 @@ export default class SynoraPlugin extends Plugin {
         this.settings.accessToken = undefined;
         await this.saveSettings();
         new Notice("Synora: your session expired. Open settings to sign in again.");
+        return;
       }
+      // Anything else: this is the only place the actual failure reason
+      // is visible at all on a platform with no console access (mobile) -
+      // console.error alone is invisible there. Shown for a full 15s
+      // since it's often long enough to need copying down by hand.
+      new Notice(`Synora sync failed: ${err instanceof Error ? err.message : String(err)}`, 15_000);
     }
   }
 

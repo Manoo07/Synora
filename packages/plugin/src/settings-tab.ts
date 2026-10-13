@@ -29,6 +29,13 @@ export class SynoraSettingTab extends PluginSettingTab {
     button.setDisabled(true).setButtonText(loadingLabel);
     try {
       await action();
+    } catch (err) {
+      // Without this, any action whose own handler doesn't already catch
+      // its errors (e.g. Scan) fails as a silent unhandled rejection -
+      // no Notice, nothing in the UI, just nothing visibly happening.
+      // Confirmed live: exactly this, on mobile with no console access
+      // to even notice the rejection in the first place.
+      new Notice(`Synora: ${err instanceof Error ? err.message : String(err)}`, 15_000);
     } finally {
       this.isBusy = false;
       // On success most handlers call this.display(), which throws this
