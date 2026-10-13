@@ -50,6 +50,13 @@
       "when": 1791905034745,
       "tag": "0006_rich_pretty_boy",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1791905834961,
+      "tag": "0007_backfill_device_limit",
+      "breakpoints": true
     }
   ]
 }
