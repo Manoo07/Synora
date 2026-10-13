@@ -107,7 +107,16 @@
 
 .synora-icon-pack-vscode .nav-folder-title .nav-folder-title-content::before,
 .synora-icon-pack-vscode .nav-file-title .nav-file-title-content::before {
-  content: "";
+  /* Some community themes set their own content on this same ::before
+     selector (for their own icon-font-based styling). If that rule wins
+     the specificity fight for just this one property, our empty string
+     gets replaced by the theme's icon-font character - which then
+     renders through our mask/background-color as an unreadable glyph,
+     since that font was never loaded here. Confirmed live with at least
+     one theme. !important is the only thing that reliably wins
+     regardless of the theme's own selector specificity, and it's safe
+     here: this pseudo-element is purely decorative, never real content. */
+  content: "" !important;
   position: absolute;
   left: 0;
   top: 50%;
