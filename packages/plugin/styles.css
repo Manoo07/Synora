@@ -1,3 +1,42 @@
+/* --- Settings tab: account/device/vault status card -------------------
+   Replaces loose <p> lines with a compact label/value card matching the
+   look of Obsidian's own boxed setting-item sections. */
+
+.synora-info-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--background-secondary);
+  border-radius: var(--radius-m, 6px);
+  padding: 12px 14px;
+  margin-bottom: 12px;
+}
+
+.synora-info-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.synora-info-label {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller, 0.85em);
+  flex-shrink: 0;
+}
+
+.synora-info-value {
+  color: var(--text-normal);
+  font-size: var(--font-ui-smaller, 0.85em);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.synora-muted {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller, 0.85em);
+}
+
 .synora-status-bar-item {
   display: flex;
   align-items: center;

@@ -13,6 +13,16 @@ export class SynoraSettingTab extends PluginSettingTab {
   private recoveryPassword = "";
   private recoveryCode = "";
   private pendingNotice = false;
+  // Obsidian can invoke display() twice in quick succession when the tab
+  // is opened (a known quirk - not something this plugin triggers). Each
+  // call's async follow-ups (vault lookups, device list refreshes) used
+  // to write into shared instance fields re-read at resolution time, so
+  // a stale first call's callback could still land in the DOM the second
+  // call had already rebuilt - confirmed live as a duplicated "No other
+  // devices waiting." line. Every async callback below captures its own
+  // generation and bails out if a newer display() has since superseded
+  // it, rather than touching the DOM at all.
+  private renderGeneration = 0;
   // Guards every network-triggering action on this tab against a second
   // click while the first is still in flight - without this, a button
   // with no visual feedback gets clicked repeatedly (confirmed live: 7
@@ -51,6 +61,7 @@ export class SynoraSettingTab extends PluginSettingTab {
   }
 
   display(): void {
+    this.renderGeneration++;
     this.containerEl.empty();
 
     new Setting(this.containerEl).setName("Server URL").addText((text) =>
@@ -205,10 +216,11 @@ export class SynoraSettingTab extends PluginSettingTab {
   }
 
   renderSignedIn(): void {
-    this.containerEl.createEl("p", { text: `Signed in as ${this.plugin.settings.email ?? "unknown"}` });
-    this.containerEl.createEl("p", {
-      text: `This device: ${this.plugin.settings.deviceName} (${this.plugin.settings.deviceId ?? "unknown id"})`,
-    });
+    const myGeneration = this.renderGeneration;
+    const info = this.containerEl.createDiv({ cls: "synora-info-panel" });
+    this.addInfoRow(info, "Account", this.plugin.settings.email ?? "unknown");
+    const deviceValue = this.addInfoRow(info, "Device", this.plugin.settings.deviceName);
+    deviceValue.title = this.plugin.settings.deviceId ?? "unknown id";
 
     if (!this.plugin.settings.vaultId) {
       // Don't assume "no vaultId on this device" means "no vault on this
@@ -224,6 +236,7 @@ export class SynoraSettingTab extends PluginSettingTab {
       void this.plugin
         .listAccessibleVaults()
         .then(async (accessible) => {
+          if (myGeneration !== this.renderGeneration) return;
           checkingEl.remove();
           if (accessible.length > 0) {
             this.containerEl.createEl("h3", { text: "This device already has access to" });
@@ -244,6 +257,7 @@ export class SynoraSettingTab extends PluginSettingTab {
           }
 
           const vaults = await this.plugin.api.listVaults();
+          if (myGeneration !== this.renderGeneration) return;
           const foundExisting = vaults.length > 0;
           if (foundExisting) {
             this.containerEl.createEl("h3", { text: accessible.length > 0 ? "Or recover a different vault" : "Recover vault access" });
@@ -268,8 +282,10 @@ export class SynoraSettingTab extends PluginSettingTab {
             });
         })
         .catch(async (err) => {
+          if (myGeneration !== this.renderGeneration) return;
           checkingEl.remove();
           if (await this.handleIfSessionExpired(err)) return;
+          if (myGeneration !== this.renderGeneration) return;
           new Setting(this.containerEl)
             .setName("No vault yet")
             .setDesc(`Could not check for an existing vault: ${err instanceof Error ? err.message : String(err)}`)
@@ -281,9 +297,11 @@ export class SynoraSettingTab extends PluginSettingTab {
             );
         });
     } else {
-      this.containerEl.createEl("p", { text: `Vault: ${this.plugin.settings.vaultId}` });
-      this.syncStatusEl = this.containerEl.createEl("p", { text: "Checking sync status…" });
-      void this.renderSyncStatus();
+      const vaultId = this.plugin.settings.vaultId;
+      const vaultValue = this.addInfoRow(info, "Vault", vaultId.slice(0, 8) + "…");
+      vaultValue.title = vaultId;
+      const syncValue = this.addInfoRow(info, "Sync", "Checking…");
+      void this.renderSyncStatus(syncValue, myGeneration);
       new Setting(this.containerEl)
         .setName("Wrong vault?")
         .setDesc(
@@ -304,7 +322,7 @@ export class SynoraSettingTab extends PluginSettingTab {
           btn.setButtonText("Scan").onClick(() =>
             void this.runBusy(btn, "Scanning...", async () => {
               await this.plugin.scanAndQueueExistingFiles();
-              await this.renderSyncStatus();
+              await this.renderSyncStatus(syncValue, myGeneration);
             }),
           ),
         );
@@ -312,23 +330,35 @@ export class SynoraSettingTab extends PluginSettingTab {
         .setName("Pending devices")
         .setDesc("Devices waiting to be approved for this vault.")
         .addButton((btn) =>
-          btn.setButtonText("Refresh").onClick(() => void this.runBusy(btn, "Loading...", () => this.renderPendingDevices())),
+          btn
+            .setButtonText("Refresh")
+            .onClick(() => void this.runBusy(btn, "Loading...", () => this.renderPendingDevices(pendingListEl, myGeneration))),
         );
-      this.pendingListEl = this.containerEl.createDiv();
-      this.pendingListEl.createEl("p", { text: "Loading…" });
-      void this.renderPendingDevices();
+      const pendingListEl = this.containerEl.createDiv();
+      pendingListEl.createEl("p", { text: "Loading…", cls: "synora-muted" });
+      void this.renderPendingDevices(pendingListEl, myGeneration);
     }
   }
 
-  private syncStatusEl?: HTMLElement;
+  // A clean label/value row inside the account-status card, replacing a
+  // loose <p> line. Returns the value element so callers (sync status,
+  // in particular) can update it in place later.
+  private addInfoRow(container: HTMLElement, label: string, value: string): HTMLElement {
+    const row = container.createDiv({ cls: "synora-info-row" });
+    row.createSpan({ cls: "synora-info-label", text: label });
+    return row.createSpan({ cls: "synora-info-value", text: value });
+  }
 
   // The clean "yes, everything is synced" signal the status bar alone
   // doesn't give: zero items left in this device's local upload queue.
   // Distinct from "nothing is happening right now" - a flush can finish
   // and still leave something queued (e.g. a conflict it just re-filed).
-  private async renderSyncStatus(): Promise<void> {
-    if (!this.syncStatusEl) return;
+  // Takes its target element and the display() generation it belongs to
+  // directly, rather than reading a shared instance field - see
+  // renderGeneration above for why.
+  private async renderSyncStatus(target: HTMLElement, generation: number): Promise<void> {
     const pending = await this.plugin.getPendingUploadCount();
+    if (generation !== this.renderGeneration) return;
     let text = pending > 0 ? `⟳ ${pending} file${pending === 1 ? "" : "s"} waiting to upload` : "✓ All files synced";
 
     try {
@@ -342,24 +372,24 @@ export class SynoraSettingTab extends PluginSettingTab {
       // already rendered - not worth failing the whole status line over.
     }
 
-    this.syncStatusEl.setText(text);
+    if (generation !== this.renderGeneration) return;
+    target.setText(text);
   }
 
-  private pendingListEl?: HTMLElement;
-
-  private async renderPendingDevices(): Promise<void> {
-    if (!this.pendingListEl || !this.plugin.settings.vaultId) return;
-    this.pendingListEl.empty();
+  private async renderPendingDevices(target: HTMLElement, generation: number): Promise<void> {
+    if (!this.plugin.settings.vaultId) return;
+    target.empty();
     try {
       const { pending } = await this.plugin.api.listDevices(this.plugin.settings.vaultId);
+      if (generation !== this.renderGeneration) return;
       const others = (pending as Array<{ id: string; name: string; publicKey: string }>).filter(
         (d) => d.id !== this.plugin.settings.deviceId,
       );
       if (others.length === 0) {
-        this.pendingListEl.createEl("p", { text: "No other devices waiting." });
+        target.createEl("p", { text: "No other devices waiting.", cls: "synora-muted" });
       }
       for (const device of others) {
-        new Setting(this.pendingListEl).setName(device.name).addButton((btn) =>
+        new Setting(target).setName(device.name).addButton((btn) =>
           btn
             .setButtonText("Approve")
             .setCta()
@@ -370,7 +400,8 @@ export class SynoraSettingTab extends PluginSettingTab {
       }
     } catch (err) {
       if (await this.handleIfSessionExpired(err)) return;
-      this.pendingListEl.createEl("p", {
+      if (generation !== this.renderGeneration) return;
+      target.createEl("p", {
         text: `Could not load pending devices: ${err instanceof Error ? err.message : String(err)}`,
       });
     }
