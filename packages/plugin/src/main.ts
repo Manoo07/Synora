@@ -9,6 +9,7 @@ import { WriteSuppressor } from "./sync/suppressor.js";
 import type { KeyValueStore } from "./sync/storage.js";
 import { ObsidianVaultAdapter } from "./vault-adapter.js";
 import { DEFAULT_SETTINGS, type SynoraSettings } from "./settings.js";
+import { ICON_PACKS } from "./icon-packs.js";
 import { SynoraSettingTab } from "./settings-tab.js";
 import { RecoveryCodeModal } from "./recovery-modal.js";
 import {
@@ -104,8 +105,12 @@ export default class SynoraPlugin extends Plugin {
   // rules in styles.css (file-explorer icons by extension, via the
   // data-path attribute Obsidian already sets on each row) - no DOM
   // watching needed. Called on load and whenever the setting changes.
+  // Generalized over ICON_PACKS so a new pack needs no edit here - just
+  // a registry entry (icon-packs.ts) and its own CSS block.
   applyIconPack(): void {
-    document.body.toggleClass("synora-icon-pack-vscode", this.settings.iconPack === "vscode");
+    for (const pack of ICON_PACKS) {
+      document.body.toggleClass(`synora-icon-pack-${pack.id}`, pack.id !== "none" && this.settings.iconPack === pack.id);
+    }
   }
 
   // Reusable whenever the engine might need to come up: on load, and

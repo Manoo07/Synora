@@ -1,10 +1,13 @@
+import type { IconPackId } from "./icon-packs.js";
+
 export interface SynoraSettings {
   serverUrl: string;
   deviceName: string;
   syncIntervalSeconds: number;
   // Purely cosmetic - toggles a CSS-only file-explorer icon pack (see
   // styles.css). "none" changes nothing from Obsidian's default look.
-  iconPack: "none" | "vscode";
+  // See icon-packs.ts for the registry this type is derived from.
+  iconPack: IconPackId;
 
   // Undefined/empty = the "move images to a folder" feature isn't
   // configured. One-time bulk reorganization, not an ongoing router -

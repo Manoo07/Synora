@@ -1,6 +1,7 @@
 import { App, ButtonComponent, Notice, PluginSettingTab, Setting } from "obsidian";
 import type SynoraPlugin from "./main.js";
 import { ApiError } from "./api/client.js";
+import { ICON_PACKS, type IconPackId } from "./icon-packs.js";
 
 function formatBytes(bytes: number): string {
   const mb = bytes / (1024 * 1024);
@@ -64,6 +65,8 @@ export class SynoraSettingTab extends PluginSettingTab {
     this.renderGeneration++;
     this.containerEl.empty();
 
+    this.containerEl.createEl("h2", { text: "Sync" });
+
     new Setting(this.containerEl).setName("Server URL").addText((text) =>
       text.setValue(this.plugin.settings.serverUrl).onChange(async (value) => {
         this.plugin.settings.serverUrl = value;
@@ -79,20 +82,28 @@ export class SynoraSettingTab extends PluginSettingTab {
       }),
     );
 
+    const needsRecovery = this.pendingNotice || this.plugin.needsVaultKeyRecovery;
+    if (this.plugin.settings.accessToken && !needsRecovery) {
+      this.renderSignedIn();
+    } else {
+      this.renderSignIn(needsRecovery);
+    }
+
+    this.containerEl.createEl("h2", { text: "Appearance" });
+
     new Setting(this.containerEl)
       .setName("File icon pack")
       .setDesc("Adds file-type icons to the file explorer, for easier scanning of large vaults.")
-      .addDropdown((dd) =>
-        dd
-          .addOption("none", "None (default)")
-          .addOption("vscode", "VS Code style")
-          .setValue(this.plugin.settings.iconPack)
-          .onChange(async (value) => {
-            this.plugin.settings.iconPack = value as "none" | "vscode";
-            await this.plugin.saveSettings();
-            this.plugin.applyIconPack();
-          }),
-      );
+      .addDropdown((dd) => {
+        for (const pack of ICON_PACKS) dd.addOption(pack.id, pack.label);
+        dd.setValue(this.plugin.settings.iconPack).onChange(async (value) => {
+          this.plugin.settings.iconPack = value as IconPackId;
+          await this.plugin.saveSettings();
+          this.plugin.applyIconPack();
+        });
+      });
+
+    this.containerEl.createEl("h2", { text: "Attachments" });
 
     new Setting(this.containerEl)
       .setName("Attachments folder")
@@ -117,13 +128,6 @@ export class SynoraSettingTab extends PluginSettingTab {
           }),
         ),
       );
-
-    const needsRecovery = this.pendingNotice || this.plugin.needsVaultKeyRecovery;
-    if (this.plugin.settings.accessToken && !needsRecovery) {
-      this.renderSignedIn();
-    } else {
-      this.renderSignIn(needsRecovery);
-    }
   }
 
   renderSignIn(needsRecovery = false): void {
