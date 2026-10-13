@@ -31,7 +31,10 @@ vaultRoutes.post("/", requireAuth, async (c) => {
   const deviceId = c.var.deviceId;
 
   const vault = await c.env.DB.transaction(async (tx) => {
-    const [vault] = await tx.insert(vaults).values({ ownerId: userId }).returning();
+    // The creating device is the primary by default - see
+    // vaults.primaryDeviceId in schema.ts. Any device on the vault can
+    // reassign it later via PUT /:vaultId/primary-device.
+    const [vault] = await tx.insert(vaults).values({ ownerId: userId, primaryDeviceId: deviceId }).returning();
     await tx.insert(vaultMembers).values({ vaultId: vault!.id, userId, role: "owner" });
     await tx.insert(wrappedVaultKeys).values({
       vaultId: vault!.id,
@@ -160,6 +163,31 @@ vaultRoutes.get("/:vaultId/wrapped-key", requireAuth, async (c) => {
   const row = rows.sort((a, b) => b.keyEpoch - a.keyEpoch)[0];
   if (!row) throw forbidden("No wrapped key available for this device yet");
   return c.json({ wrappedKey: row.wrappedKey, keyEpoch: row.keyEpoch });
+});
+
+// --- Primary device (preferences source of truth) -----------------------
+//
+// Any active device on the vault can claim primary for itself - every
+// device here belongs to the same account already, so there's no
+// separate owner-only restriction. See routes/sync.ts's /preferences
+// endpoints, which gate pushing on whichever device holds this.
+
+vaultRoutes.put("/:vaultId/primary-device", requireAuth, async (c) => {
+  const vaultId = c.req.param("vaultId");
+  await requireVaultAccess(c, vaultId);
+  await c.env.DB.update(vaults).set({ primaryDeviceId: c.var.deviceId }).where(eq(vaults.id, vaultId));
+  return c.json({ status: "ok", deviceId: c.var.deviceId });
+});
+
+vaultRoutes.get("/:vaultId/primary-device", requireAuth, async (c) => {
+  const vaultId = c.req.param("vaultId");
+  await requireVaultAccess(c, vaultId);
+  const [row] = await c.env.DB.select({ deviceId: devices.id, deviceName: devices.name })
+    .from(vaults)
+    .innerJoin(devices, eq(devices.id, vaults.primaryDeviceId))
+    .where(eq(vaults.id, vaultId))
+    .limit(1);
+  return c.json(row ?? null);
 });
 
 // --- Recovery: regain vault access with no other trusted device --------

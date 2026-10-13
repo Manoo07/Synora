@@ -4,7 +4,7 @@ import { z } from "zod";
 import type { AppEnv } from "../context.js";
 import { files, fileVersions, changeEvents, deviceCursors, storageObjects, vaults, users } from "../db/schema.js";
 import { requireAuth, requireVaultAccess } from "../auth/middleware.js";
-import { badRequest, conflict, notFound, payloadTooLarge, quotaExceeded } from "../lib/errors.js";
+import { badRequest, conflict, forbidden, notFound, payloadTooLarge, quotaExceeded } from "../lib/errors.js";
 
 export const syncRoutes = new Hono<AppEnv>();
 syncRoutes.use("*", requireAuth);
@@ -225,6 +225,99 @@ syncRoutes.get("/:vaultId/objects/:blobKey", async (c) => {
 
   const object = await c.env.BUCKET.get(blobKey);
   if (!object) throw notFound("Object not found");
+  const bytes = await object.arrayBuffer();
+  return new Response(bytes, { headers: { "content-type": "application/octet-stream" } });
+});
+
+// --- Preferences (primary device's theme/plugins/settings bundle) ---------
+//
+// A single, always-overwritten blob per vault - genuinely simpler than
+// the file-commit protocol above (no version history, no conflict
+// concept: pushing just replaces whatever was there). Deliberately kept
+// separate from /commits rather than threaded through it. See
+// protocol-spec.md's design notes are file-sync specific; this is its
+// own small, parallel thing.
+
+function preferencesObjectKey(vaultId: string): string {
+  return `${vaultId}/preferences`;
+}
+
+syncRoutes.get("/:vaultId/preferences/info", async (c) => {
+  const vaultId = c.req.param("vaultId");
+  await requireVaultAccess(c, vaultId);
+  const [row] = await c.env.DB.select()
+    .from(storageObjects)
+    .where(eq(storageObjects.objectKey, preferencesObjectKey(vaultId)))
+    .limit(1);
+  if (!row) return c.json({ exists: false });
+  return c.json({ exists: true, updatedAt: row.createdAt, sizeBytes: row.sizeBytes });
+});
+
+// Only the vault's primary device may push - any active device may fetch
+// (GET below). Writes to R2 first, then does the DB bookkeeping: if the
+// DB step failed after a successful R2 write, the worst case is an
+// orphaned blob (harmless or cheaply reaped later), not a record of
+// stored bytes that were never actually written.
+syncRoutes.put("/:vaultId/preferences", async (c) => {
+  const vaultId = c.req.param("vaultId");
+  await requireVaultAccess(c, vaultId);
+
+  const [vault] = await c.env.DB.select({ primaryDeviceId: vaults.primaryDeviceId, ownerId: vaults.ownerId })
+    .from(vaults)
+    .where(eq(vaults.id, vaultId))
+    .limit(1);
+  if (!vault) throw notFound("Vault not found");
+  if (vault.primaryDeviceId !== c.var.deviceId) {
+    throw forbidden("Only this vault's primary device can push preferences");
+  }
+
+  const declaredLength = Number(c.req.header("content-length") ?? "0");
+  if (declaredLength > MAX_UPLOAD_BYTES) throw payloadTooLarge(`Preferences exceed the ${MAX_UPLOAD_BYTES} byte limit`);
+  const bytes = new Uint8Array(await c.req.arrayBuffer());
+  if (bytes.byteLength > MAX_UPLOAD_BYTES) throw payloadTooLarge(`Preferences exceed the ${MAX_UPLOAD_BYTES} byte limit`);
+
+  const objectKey = preferencesObjectKey(vaultId);
+  await c.env.BUCKET.put(objectKey, bytes);
+
+  await c.env.DB.transaction(async (tx) => {
+    // Serializes concurrent pushes for this vault's preferences blob,
+    // same technique as the commit lock above.
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${objectKey}))`);
+
+    const [owner] = await tx
+      .select({ id: users.id, plan: users.plan, storageLimitBytes: users.storageLimitBytes, storageBytesUsed: users.storageBytesUsed })
+      .from(users)
+      .where(eq(users.id, vault.ownerId))
+      .limit(1);
+    if (!owner) throw notFound("Account not found");
+
+    const [existing] = await tx.select().from(storageObjects).where(eq(storageObjects.objectKey, objectKey)).limit(1);
+    const previousSize = existing?.sizeBytes ?? 0;
+    // Replace semantics: this blob is always overwritten, never
+    // accumulated - the quota check and update are against the *net*
+    // size delta, not the full new size, so repeatedly pushing the same
+    // vault's preferences can't silently inflate the quota forever.
+    const projectedUsage = owner.storageBytesUsed - previousSize + bytes.byteLength;
+    if (owner.plan === "free" && projectedUsage > owner.storageLimitBytes) {
+      throw quotaExceeded(`This account's free ${Math.round(owner.storageLimitBytes / (1024 * 1024))}MB storage limit is used up.`);
+    }
+
+    if (existing) await tx.delete(storageObjects).where(eq(storageObjects.objectKey, objectKey));
+    await tx.insert(storageObjects).values({ provider: "r2", objectKey, sizeBytes: bytes.byteLength, vaultId });
+    await tx
+      .update(users)
+      .set({ storageBytesUsed: sql`${users.storageBytesUsed} - ${previousSize} + ${bytes.byteLength}` })
+      .where(eq(users.id, owner.id));
+  });
+
+  return c.json({ status: "ok", sizeBytes: bytes.byteLength });
+});
+
+syncRoutes.get("/:vaultId/preferences", async (c) => {
+  const vaultId = c.req.param("vaultId");
+  await requireVaultAccess(c, vaultId);
+  const object = await c.env.BUCKET.get(preferencesObjectKey(vaultId));
+  if (!object) throw notFound("No preferences have been shared for this vault yet");
   const bytes = await object.arrayBuffer();
   return new Response(bytes, { headers: { "content-type": "application/octet-stream" } });
 });

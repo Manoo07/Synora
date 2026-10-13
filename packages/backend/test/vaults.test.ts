@@ -327,4 +327,65 @@ describe("vaults and device isolation", () => {
       wrappedKey: "wrapped-a-for-device-2-recovered",
     });
   });
+
+  it("defaults the creating device to primary, and lets another enrolled device claim it instead", async () => {
+    const bindings = testBindings();
+    const alice = await registerUser(bindings, "alice@example.com");
+    const vault = await createVault(bindings, alice.accessToken);
+
+    const initial = await app.request(
+      `/v1/vaults/${vault.id}/primary-device`,
+      { headers: { authorization: `Bearer ${alice.accessToken}` } },
+      bindings,
+    );
+    expect(initial.status).toBe(200);
+    expect((await initial.json()) as { deviceId: string }).toMatchObject({ deviceId: alice.deviceId });
+
+    // A second device, enrolled normally, claims primary for itself -
+    // every device here belongs to the same account, no owner-only
+    // restriction.
+    const secondLogin = await app.request(
+      "/v1/auth/login",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: "alice@example.com", password: "password123", devicePublicKey: "device-2" }),
+      },
+      bindings,
+    );
+    const { deviceId: secondDeviceId } = (await secondLogin.json()) as { deviceId: string };
+    await app.request(
+      `/v1/vaults/${vault.id}/devices`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${alice.accessToken}` },
+        body: JSON.stringify({ deviceId: secondDeviceId, wrappedVaultKey: "wrapped-for-device-2", keyEpoch: 1 }),
+      },
+      bindings,
+    );
+    const secondLoginAgain = await app.request(
+      "/v1/auth/login",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: "alice@example.com", password: "password123", devicePublicKey: "device-2" }),
+      },
+      bindings,
+    );
+    const { accessToken: secondToken } = (await secondLoginAgain.json()) as { accessToken: string };
+
+    const claim = await app.request(
+      `/v1/vaults/${vault.id}/primary-device`,
+      { method: "PUT", headers: { authorization: `Bearer ${secondToken}` } },
+      bindings,
+    );
+    expect(claim.status).toBe(200);
+
+    const after = await app.request(
+      `/v1/vaults/${vault.id}/primary-device`,
+      { headers: { authorization: `Bearer ${alice.accessToken}` } },
+      bindings,
+    );
+    expect((await after.json()) as { deviceId: string }).toMatchObject({ deviceId: secondDeviceId });
+  });
 });

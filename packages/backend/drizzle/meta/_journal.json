@@ -36,6 +36,20 @@
       "when": 1791885579829,
       "tag": "0004_wonderful_misty_knight",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1791903268243,
+      "tag": "0005_rare_pyro",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1791905034745,
+      "tag": "0006_rich_pretty_boy",
+      "breakpoints": true
     }
   ]
 }

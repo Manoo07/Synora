@@ -29,10 +29,8 @@ export const users = pgTable("users", {
   // public key for this account - see routes/auth.ts. Unlike the storage
   // quota/global ceiling above, a device count isn't a real cost driver
   // (no meaningful extra R2/Postgres/Workers cost per device) - this is
-  // pure pricing-tier groundwork, so the default is set high enough to
-  // never realistically block real usage before there's an actual paid
-  // tier to raise it for.
-  deviceLimit: integer("device_limit").notNull().default(10),
+  // pure pricing-tier groundwork. Free-tier default is 7.
+  deviceLimit: integer("device_limit").notNull().default(7),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({
   emailIdx: uniqueIndex("users_email_idx").on(t.email),
@@ -44,6 +42,13 @@ export const vaults = pgTable("vaults", {
   id: uuid("id").primaryKey().defaultRandom(),
   ownerId: uuid("owner_id").notNull().references(() => users.id),
   keyEpoch: integer("key_epoch").notNull().default(1),
+  // The device whose Obsidian preferences (theme, community plugins,
+  // settings, hotkeys) are the source of truth for this vault - see
+  // routes/sync.ts's /preferences endpoints. Nullable: a vault with no
+  // primary set yet just means no device has claimed it. Set to the
+  // creating device by default (routes/vaults.ts POST /), reassignable
+  // by any device on the vault afterward.
+  primaryDeviceId: uuid("primary_device_id").references(() => devices.id),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
