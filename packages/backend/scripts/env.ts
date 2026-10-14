@@ -35,11 +35,20 @@ const LOCAL_DEV_URL = "postgres://synora:synora@localhost:5435/synora";
 // tell the difference. Any script that writes has to be explicit about
 // which database it is writing to.
 export function resolveDatabaseUrl(scriptName: string): string {
+  // --local is read BEFORE .env and wins outright. It exists precisely
+  // to say "not the configured database", so letting a .env override it
+  // inverts the one instruction it carries - and the failure is silent,
+  // because the command still succeeds against the wrong database.
+  const wantsLocal = process.argv.includes("--local");
+  if (wantsLocal) {
+    console.log(`${scriptName}: --local → ${LOCAL_DEV_URL.replace(/\/\/[^@]*@/, "//")}`);
+    return LOCAL_DEV_URL;
+  }
+
   loadDotEnv();
   const fromEnv = process.env.DATABASE_URL;
-  const wantsLocal = process.argv.includes("--local");
 
-  if (!fromEnv && !wantsLocal) {
+  if (!fromEnv) {
     console.error(
       `${scriptName}: DATABASE_URL is not set.\n\n` +
         `  Set it for this command:   DATABASE_URL='postgres://…' npm run ${scriptName}\n` +
@@ -49,7 +58,7 @@ export function resolveDatabaseUrl(scriptName: string): string {
     process.exit(1);
   }
 
-  const url = fromEnv ?? LOCAL_DEV_URL;
+  const url = fromEnv;
   // Host only - never the credentials.
   let target = "unparseable url";
   try {
@@ -58,6 +67,6 @@ export function resolveDatabaseUrl(scriptName: string): string {
   } catch {
     // Leave the placeholder; postgres.js will complain soon enough.
   }
-  console.log(`${scriptName}: using ${fromEnv ? "DATABASE_URL" : "LOCAL dev database"} → ${target}`);
+  console.log(`${scriptName}: using DATABASE_URL → ${target}`);
   return url;
 }

@@ -1,0 +1,1 @@
+ALTER TABLE "vaults" ADD COLUMN "name_ciphertext" text;

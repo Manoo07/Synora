@@ -388,4 +388,50 @@ describe("vaults and device isolation", () => {
     );
     expect((await after.json()) as { deviceId: string }).toMatchObject({ deviceId: secondDeviceId });
   });
+
+  it("stores and hands back a vault name without being able to read it", async () => {
+    const bindings = testBindings();
+    const alice = await registerUser(bindings, "alice@example.com");
+    const vault = await createVault(bindings, alice.accessToken);
+
+    // Opaque bytes as far as the server is concerned - it never
+    // decrypts, so a vault's name leaks nothing to the host.
+    const ciphertext = "ZW5jcnlwdGVkLXZhdWx0LW5hbWU=";
+    const put = await app.request(
+      `/v1/vaults/${vault.id}/name`,
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json", authorization: `Bearer ${alice.accessToken}` },
+        body: JSON.stringify({ nameCiphertext: ciphertext }),
+      },
+      bindings,
+    );
+    expect(put.status).toBe(200);
+
+    const list = await app.request(
+      "/v1/vaults",
+      { headers: { authorization: `Bearer ${alice.accessToken}` } },
+      bindings,
+    );
+    const vaults = (await list.json()) as Array<{ id: string; nameCiphertext: string | null }>;
+    expect(vaults.find((v) => v.id === vault.id)?.nameCiphertext).toBe(ciphertext);
+  });
+
+  it("will not let someone rename a vault they are not a member of", async () => {
+    const bindings = testBindings();
+    const alice = await registerUser(bindings, "alice@example.com");
+    const bob = await registerUser(bindings, "bob@example.com");
+    const vault = await createVault(bindings, alice.accessToken);
+
+    const res = await app.request(
+      `/v1/vaults/${vault.id}/name`,
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json", authorization: `Bearer ${bob.accessToken}` },
+        body: JSON.stringify({ nameCiphertext: "aGFja2Vk" }),
+      },
+      bindings,
+    );
+    expect(res.status).toBe(403);
+  });
 });

@@ -264,8 +264,13 @@ export class SynoraSettingTab extends PluginSettingTab {
             });
             for (const vault of accessible) {
               new Setting(this.containerEl)
-                .setName(vault.id)
-                .setDesc(vault.latestSequence > 0 ? `${vault.latestSequence} synced change(s)` : "Empty")
+                .setName(vault.name ?? vault.id)
+                .setDesc(
+                  vault.latestSequence > 0
+                    ? `${vault.fileCount} file${vault.fileCount === 1 ? "" : "s"} · ${vault.latestSequence} synced change(s)` +
+                      (vault.name ? ` · ${vault.id.slice(0, 8)}…` : "")
+                    : "Empty",
+                )
                 .addButton((btn) =>
                   btn
                     .setButtonText("Attach")
@@ -359,6 +364,38 @@ export class SynoraSettingTab extends PluginSettingTab {
           );
         }
       }
+
+      new Setting(this.containerEl)
+        .setName("Vault name")
+        .setDesc(
+          "A label for this vault, so several on one account can be told apart. Encrypted with your vault key " +
+            "before it leaves the device - the server stores it without being able to read it.",
+        )
+        .addText((text) => {
+          text.setPlaceholder("e.g. Personal notes");
+          void this.plugin.api
+            .listVaults()
+            .then((vaults) => {
+              if (myGeneration !== this.renderGeneration) return;
+              const mine = vaults.find((v) => v.id === vaultId);
+              text.setValue(this.plugin.decryptVaultName(mine?.nameCiphertext) ?? "");
+            })
+            .catch(() => {
+              // Leave it blank; typing a name still saves fine.
+            });
+          // Saved on blur rather than per keystroke: each save is an
+          // encrypt plus a request, and nobody needs that per letter.
+          text.inputEl.addEventListener("blur", () => {
+            void (async () => {
+              try {
+                await this.plugin.setVaultName(text.getValue());
+                this.display();
+              } catch (err) {
+                new Notice(`Could not save the vault name: ${err instanceof Error ? err.message : String(err)}`);
+              }
+            })();
+          });
+        });
 
       new Setting(this.containerEl)
         .setName("Wrong vault?")
@@ -464,7 +501,9 @@ export class SynoraSettingTab extends PluginSettingTab {
       if (!mine) return;
 
       const files = `${mine.fileCount} file${mine.fileCount === 1 ? "" : "s"}`;
-      target.setText(`${vaultId.slice(0, 8)}… · ${files} · ${formatBytes(mine.sizeBytes)}`);
+      const name = this.plugin.decryptVaultName(mine.nameCiphertext);
+      const label = name ?? `${vaultId.slice(0, 8)}…`;
+      target.setText(`${label} · ${files} · ${formatBytes(mine.sizeBytes)}`);
 
       // Say so plainly when the account has more than one, so an empty
       // vault next to a full one is visible rather than something you
@@ -472,7 +511,7 @@ export class SynoraSettingTab extends PluginSettingTab {
       if (vaults.length > 1) {
         const others = vaults
           .filter((v) => v.id !== vaultId)
-          .map((v) => `${v.id.slice(0, 8)}… (${v.fileCount})`)
+          .map((v) => `${this.plugin.decryptVaultName(v.nameCiphertext) ?? `${v.id.slice(0, 8)}…`} (${v.fileCount})`)
           .join(", ");
         target.title = `This account has ${vaults.length} vaults. Others: ${others}`;
       }

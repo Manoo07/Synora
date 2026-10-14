@@ -627,6 +627,36 @@ export default class SynoraPlugin extends Plugin {
     return (await this.engine?.pendingUploadCount()) ?? 0;
   }
 
+  // The name is encrypted under the vault key like everything else, so
+  // the server stores bytes it cannot read. That does mean only a
+  // device holding the key can show it - a vault this device has no
+  // key for still displays as its id, which is correct: it genuinely
+  // knows nothing about that vault.
+  encryptVaultName(name: string): string {
+    if (!this.vaultKey || !this.settings.vaultId) throw new Error("No vault key on this device");
+    const bytes = new TextEncoder().encode(name);
+    const envelope = encryptEnvelope(this.vaultKey, this.settings.vaultId, this.settings.vaultId, "vault-name", bytes);
+    return bytesToBase64(encodeEnvelope(envelope));
+  }
+
+  decryptVaultName(nameCiphertext: string | null | undefined): string | undefined {
+    if (!nameCiphertext || !this.vaultKey) return undefined;
+    try {
+      return new TextDecoder().decode(decryptEnvelope(this.vaultKey, decodeEnvelope(base64ToBytes(nameCiphertext))));
+    } catch {
+      // Wrong key for this vault, or a name written under a newer
+      // format. Falling back to the id beats showing an error where a
+      // label should be.
+      return undefined;
+    }
+  }
+
+  async setVaultName(name: string): Promise<void> {
+    if (!this.settings.vaultId) return;
+    const trimmed = name.trim();
+    await this.api.setVaultName(this.settings.vaultId, trimmed ? this.encryptVaultName(trimmed) : null);
+  }
+
   async getPendingDownloadCount(): Promise<number> {
     return (await this.engine?.pendingDownloadCount()) ?? 0;
   }
@@ -827,17 +857,38 @@ export default class SynoraPlugin extends Plugin {
   // exactly the ambiguity that led to repeatedly recreating empty vaults
   // instead of reattaching to the real one, confirmed live (one device
   // ended up with three separate grants this way).
-  async listAccessibleVaults(): Promise<Array<{ id: string; latestSequence: number }>> {
+  async listAccessibleVaults(): Promise<
+    Array<{ id: string; latestSequence: number; name?: string; fileCount: number }>
+  > {
     const vaults = await this.api.listVaults();
-    const accessible: Array<{ id: string; latestSequence: number }> = [];
+    const accessible: Array<{ id: string; latestSequence: number; name?: string; fileCount: number }> = [];
     for (const vault of vaults) {
+      let wrapped;
       try {
-        await this.api.getWrappedKey(vault.id);
+        wrapped = await this.api.getWrappedKey(vault.id);
       } catch {
         continue; // no grant for this vault - not an option here
       }
       const status = await this.api.status(vault.id).catch(() => ({ latestSequence: 0 }));
-      accessible.push({ id: vault.id, latestSequence: status.latestSequence });
+
+      // Unwrap purely to read this vault's label, then drop it. This is
+      // the screen where someone picks a vault, so it is exactly where
+      // a name earns its keep - and the key is right here, since having
+      // a grant is what put the vault in this list at all.
+      let name: string | undefined;
+      try {
+        if (vault.nameCiphertext && this.settings.deviceSecretKeyB64) {
+          const key = unwrapVaultKey(
+            base64ToBytes(wrapped.wrappedKey),
+            base64ToBytes(this.settings.deviceSecretKeyB64),
+          );
+          name = new TextDecoder().decode(decryptEnvelope(key, decodeEnvelope(base64ToBytes(vault.nameCiphertext))));
+        }
+      } catch {
+        // An unreadable label is not a reason to hide a vault someone
+        // may need to attach to.
+      }
+      accessible.push({ id: vault.id, latestSequence: status.latestSequence, name, fileCount: vault.fileCount });
     }
     return accessible;
   }

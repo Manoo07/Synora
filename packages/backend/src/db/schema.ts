@@ -49,6 +49,14 @@ export const vaults = pgTable("vaults", {
   // creating device by default (routes/vaults.ts POST /), reassignable
   // by any device on the vault afterward.
   primaryDeviceId: uuid("primary_device_id").references(() => devices.id),
+  // A name the person gave this vault, encrypted under the vault key
+  // like everything else. An account can hold several vaults and a hex
+  // id tells nobody which is which - but the name is text the person
+  // wrote, so storing it readable here would hand the server exactly
+  // the kind of thing ("Health journal", "Work - Acme") the whole
+  // design exists to keep from it. The server stores and returns the
+  // ciphertext; only a device holding the vault key can read it.
+  nameCiphertext: text("name_ciphertext"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

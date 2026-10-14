@@ -140,8 +140,22 @@ export class SynoraApiClient {
 
   listVaults() {
     return this.request<
-      Array<{ id: string; keyEpoch: number; fileCount: number; sizeBytes: number; lastChangeAt: string | null }>
+      Array<{
+        id: string;
+        keyEpoch: number;
+        fileCount: number;
+        sizeBytes: number;
+        lastChangeAt: string | null;
+        nameCiphertext: string | null;
+      }>
     >("/v1/vaults");
+  }
+
+  setVaultName(vaultId: string, nameCiphertext: string | null) {
+    return this.request<{ status: string }>(`/v1/vaults/${vaultId}/name`, {
+      method: "PUT",
+      body: { nameCiphertext },
+    });
   }
 
   enrollDevice(vaultId: string, deviceId: string, wrappedVaultKey: string, keyEpoch: number) {

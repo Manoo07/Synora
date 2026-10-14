@@ -100,6 +100,22 @@ vaultRoutes.get("/", async (c) => {
   );
 });
 
+const setNameSchema = z.object({
+  // The already-encrypted envelope, base64. Encrypted client side, so
+  // the server never learns what the vault is called - it only stores
+  // and hands back the bytes. An explicit null clears the name.
+  nameCiphertext: z.string().min(1).max(8192).nullable(),
+});
+
+vaultRoutes.put("/:vaultId/name", requireAuth, async (c) => {
+  const vaultId = c.req.param("vaultId");
+  await requireVaultAccess(c, vaultId);
+  const body = setNameSchema.parse(await c.req.json());
+
+  await c.env.DB.update(vaults).set({ nameCiphertext: body.nameCiphertext }).where(eq(vaults.id, vaultId));
+  return c.json({ status: "ok" });
+});
+
 // --- Device enrollment, scoped to a vault -------------------------------
 
 const enrollDeviceSchema = z.object({

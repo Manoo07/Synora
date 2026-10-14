@@ -8,7 +8,7 @@ import { randomBytes } from "@noble/hashes/utils";
 // explicit handling of the old one during decode.
 export const FORMAT_VERSION = 1;
 
-export type EnvelopeContext = "file-content" | "filename" | "attachment" | "preferences-bundle";
+export type EnvelopeContext = "file-content" | "filename" | "attachment" | "preferences-bundle" | "vault-name";
 
 export interface EncryptedEnvelope {
   formatVersion: number;

@@ -64,6 +64,13 @@
       "when": 1791958505953,
       "tag": "0008_change_events_file_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1791995411344,
+      "tag": "0009_vault_name",
+      "breakpoints": true
     }
   ]
 }
