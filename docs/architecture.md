@@ -434,13 +434,21 @@ isn't one failure — it's a permanent outage for everything behind it.
 Honest list. None of these are oversights; all are either accepted
 tradeoffs or acknowledged debt.
 
-**Storage is only ever added, never reclaimed.** Every version ever
-committed counts against the 250MB quota forever. Deleting a file *increases*
-usage, because the tombstone is itself a commit. The protocol spec describes
-a 30-day grace period and a garbage-collection job — **that job does not
-exist.** There are no scheduled workers at all. This is the most significant
-piece of outstanding debt and the most likely thing to bite a long-running
-vault.
+**Storage reclamation only collects what is provably unreachable.** A
+daily job (`src/gc.ts`) now drops superseded versions and fully-deleted
+files, but only under narrow rules: never a file's current version, never
+anything a device has not acked past, never the newest event for a file
+(a new device rebuilds the vault by replaying the feed from zero), and
+never anything inside the retention window. The practical consequence is
+that **a vault with one permanently offline device reclaims nothing**,
+because that device's cursor pins everything. That is the intended
+trade: stalling reclamation is recoverable, deleting a version someone
+still needs is not.
+
+Note also that the version a device sits on is its merge base, so GC
+keeps one version per file beyond the slowest cursor. Collecting it
+would be safe for data but would quietly turn that file's next conflict
+into a conflict copy.
 
 **Merge placement near identical lines is arbitrary** (§6). Content-safe,
 convergent, but it may not put text exactly where a human would.
@@ -495,3 +503,8 @@ Explicitly out of scope. Each would require revisiting the protocol:
 - **Fallback paths** — if a feature can silently degrade into its safe
   fallback, something has to notice. §7.2 ran broken for an unknown length
   of time because nothing ever errored.
+- **`gc.ts`** — the only code that deletes user data, and the database
+  does not protect it: `files.current_version_id` is a plain column, not
+  a foreign key. Every rule it collects under is load-bearing, and
+  `npm run gc:dry-run` reports what a run would remove without removing
+  it.

@@ -136,7 +136,11 @@ plaintext fields anywhere in the API. The server's `files` table has no
   a `files.deleted_at` timestamp. The row and its version history are kept
   for a grace period (default 30 days) before a garbage-collection job
   physically removes old blobs and rows — long enough for an offline device
-  to see the tombstone before the evidence disappears.
+  to see the tombstone before the evidence disappears. Implemented in
+  `src/gc.ts`; the grace period is a floor, not the only condition —
+  collection additionally requires every non-revoked device to have acked
+  past the tombstone, so a vault with an offline device reclaims nothing
+  until that device returns or is revoked.
 
 ## 5. Commit protocol (optimistic concurrency)
 

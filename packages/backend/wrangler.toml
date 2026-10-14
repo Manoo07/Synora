@@ -3,6 +3,13 @@ main = "src/index.ts"
 compatibility_date = "2024-11-01"
 compatibility_flags = ["nodejs_compat"]
 
+# Storage reclamation, daily. Nothing else removes superseded file
+# versions, so without this an account's usage only ever climbs - every
+# save writes a whole new encrypted copy, and deleting a file adds one
+# rather than freeing any. See src/gc.ts.
+[triggers]
+crons = ["17 3 * * *"]
+
 [[r2_buckets]]
 binding = "BUCKET"
 bucket_name = "synora-bucket"
