@@ -4,7 +4,7 @@ import { encryptEnvelope, decryptEnvelope, encodeEnvelope, decodeEnvelope } from
 import { encodeManifest, decodeManifest } from "../crypto/manifest.js";
 import { SyncQueue, type PendingOp } from "./queue.js";
 import { LocalStateStore } from "./local-state.js";
-import { WriteSuppressor } from "./suppressor.js";
+import { WriteSuppressor, DELETION_MARK } from "./suppressor.js";
 import { mergeText } from "./merge.js";
 
 export interface VaultAdapter {
@@ -180,12 +180,19 @@ export class SyncEngine {
         });
 
         if (result.status === "committed") {
-          await this.deps.state.upsert({
-            fileId: result.fileId,
-            logicalPath: op.logicalPath,
-            currentVersionId: result.versionId,
-            contentHash: (await this.deps.state.getByPath(op.logicalPath))?.contentHash ?? "",
-          });
+          if (op.operation === "deleted") {
+            // The file is gone, so keeping a record for its path would
+            // leave the next file created there inheriting this one's
+            // fileId and base version.
+            await this.deps.state.remove(op.logicalPath);
+          } else {
+            await this.deps.state.upsert({
+              fileId: result.fileId,
+              logicalPath: op.logicalPath,
+              currentVersionId: result.versionId,
+              contentHash: (await this.deps.state.getByPath(op.logicalPath))?.contentHash ?? "",
+            });
+          }
           await queue.remove(op.idempotencyKey);
           continue;
         }
@@ -353,6 +360,7 @@ export class SyncEngine {
           if (change.operation === "deleted") {
             const record = await state.findByFileId(change.fileId);
             if (record) {
+              suppressor.markApplied(record.logicalPath, DELETION_MARK);
               await vault.delete(record.logicalPath);
               await state.remove(record.logicalPath);
             }
@@ -369,6 +377,7 @@ export class SyncEngine {
             // "updated".
             const previous = await state.findByFileId(change.fileId);
             if (previous && previous.logicalPath !== manifest.logicalPath) {
+              suppressor.markApplied(previous.logicalPath, DELETION_MARK);
               await vault.delete(previous.logicalPath);
               await state.remove(previous.logicalPath);
             }

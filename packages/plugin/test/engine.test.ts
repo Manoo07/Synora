@@ -3,7 +3,7 @@ import { SynoraApiClient } from "../src/api/client.js";
 import { SyncEngine } from "../src/sync/engine.js";
 import { SyncQueue } from "../src/sync/queue.js";
 import { LocalStateStore } from "../src/sync/local-state.js";
-import { WriteSuppressor } from "../src/sync/suppressor.js";
+import { WriteSuppressor, DELETION_MARK } from "../src/sync/suppressor.js";
 import { InMemoryKeyValueStore } from "../src/sync/storage.js";
 import { generateVaultKey } from "../src/crypto/keys.js";
 import { MemoryVault } from "./fakes/memory-vault.js";
@@ -369,6 +369,70 @@ describe("SyncEngine", () => {
     const merged = new TextDecoder().decode(await b.vault.read("note.md"));
     expect(merged).toBe("# Title\n\nFirst paragraph EDITED BY A.\n\nSecond paragraph EDITED BY B.");
     expect([...b.vault.files.keys()].some((p) => p.includes("conflict"))).toBe(false);
+  });
+
+  it("marks a pulled delete as applied so the vault event it fires isn't re-sent", async () => {
+    const vaultKey = generateVaultKey();
+    const makeDeviceEngine = () => {
+      const api = new SynoraApiClient("http://fake");
+      const vault = new MemoryVault();
+      const store = new InMemoryKeyValueStore();
+      const suppressor = new WriteSuppressor();
+      return {
+        engine: new SyncEngine({
+          api,
+          vaultId: VAULT_ID,
+          vaultKey,
+          vault,
+          queue: new SyncQueue(store),
+          state: new LocalStateStore(store),
+          suppressor,
+        }),
+        vault,
+        suppressor,
+      };
+    };
+
+    const a = makeDeviceEngine();
+    const b = makeDeviceEngine();
+
+    await a.engine.handleLocalChange("note.md", "created", new TextEncoder().encode("hello"));
+    await a.engine.flush();
+    await b.engine.pull();
+    expect(b.vault.files.has("note.md")).toBe(true);
+
+    await a.engine.handleLocalChange("note.md", "deleted");
+    await a.engine.flush();
+    await b.engine.pull();
+    expect(b.vault.files.has("note.md")).toBe(false);
+
+    // Obsidian fires a delete event for the removal the pull just made.
+    // That event must be recognised as our own, or it gets committed
+    // back as a brand new file (no fileId survives the delete), billing
+    // a phantom file, version and blob to the account on every device
+    // that receives any delete.
+    expect(b.suppressor.shouldSuppress("note.md", DELETION_MARK)).toBe(true);
+  });
+
+  it("stops tracking a deleted path so a file recreated there doesn't inherit its identity", async () => {
+    const { engine, api } = buildEngine();
+
+    await engine.handleLocalChange("note.md", "created", new TextEncoder().encode("first life"));
+    await engine.flush();
+    const firstFileId = (await api.getChanges(VAULT_ID, 0)).changes.at(-1)!.fileId;
+
+    await engine.handleLocalChange("note.md", "deleted");
+    await engine.flush();
+
+    await engine.handleLocalChange("note.md", "created", new TextEncoder().encode("second life"));
+    await engine.flush();
+
+    const changes = (await api.getChanges(VAULT_ID, 0)).changes;
+    expect(changes.at(-1)!.operation).toBe("created");
+    // Reusing the dead file's id would commit the new file as another
+    // version of the one just deleted, resurrecting it rather than
+    // creating a file.
+    expect(changes.at(-1)!.fileId).not.toBe(firstFileId);
   });
 
   it("never sends an empty-string fileId for a second edit to a not-yet-synced file", async () => {

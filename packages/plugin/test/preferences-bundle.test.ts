@@ -67,4 +67,25 @@ describe("preferences bundle", () => {
     expect(await adapter.exists(".obsidian/plugins/synora-sync/data.json")).toBe(false);
     expect(await adapter.exists(".obsidian/appearance.json")).toBe(true);
   });
+
+  it("refuses bundle paths that would escape the config directory", async () => {
+    const adapter = new MemoryAdapter();
+    // The bundle decides where its own bytes land, so a crafted one
+    // must not be able to walk out of .obsidian/ - including back into
+    // this plugin's own folder by spelling the path differently, which
+    // would hand another device's identity to this one.
+    const bundle = {
+      "../../evil.sh": btoa("rm -rf /"),
+      "..\\..\\evil.bat": btoa("del *"),
+      "/etc/passwd": btoa("root"),
+      "plugins/other/../synora-sync/data.json": btoa('{"deviceSecretKeyB64":"someone-elses-key"}'),
+      "appearance.json": btoa('{"theme":"moonstone"}'),
+    };
+
+    await applyPreferencesBundle(buildHost(adapter), bundle);
+
+    const written = [...adapter.files.keys()];
+    expect(written).toEqual([".obsidian/appearance.json"]);
+    expect(written.some((p) => p.includes(".."))).toBe(false);
+  });
 });

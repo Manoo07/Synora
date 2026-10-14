@@ -5,7 +5,7 @@ import { obsidianTransport } from "./api/obsidian-transport.js";
 import { SyncEngine } from "./sync/engine.js";
 import { SyncQueue } from "./sync/queue.js";
 import { LocalStateStore } from "./sync/local-state.js";
-import { WriteSuppressor } from "./sync/suppressor.js";
+import { WriteSuppressor, DELETION_MARK } from "./sync/suppressor.js";
 import type { KeyValueStore } from "./sync/storage.js";
 import { ObsidianVaultAdapter } from "./vault-adapter.js";
 import { DEFAULT_SETTINGS, type SynoraSettings } from "./settings.js";
@@ -200,6 +200,14 @@ export default class SynoraPlugin extends Plugin {
     if (this.settings.syncPaused || this.isPathPaused(file.path)) return;
 
     if (operation === "deleted") {
+      // A delete we applied ourselves while pulling a remote one fires a
+      // vault event just like a user's own does. Without this check the
+      // echo is re-sent as a fresh delete, and since the local record
+      // for the path is gone by then it carries no fileId - which the
+      // server treats as a brand new file, so every device receiving a
+      // delete silently commits a phantom file, version and blob back,
+      // billed against the account's storage.
+      if (this.suppressor.shouldSuppress(file.path, DELETION_MARK)) return;
       await this.engine.handleLocalChange(file.path, "deleted");
       return;
     }

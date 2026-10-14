@@ -6,6 +6,11 @@
 // event handler consumes the mark - once checked, it's gone, so a second
 // edit to the same path is never accidentally swallowed.
 // See architecture doc §6, "Prevent sync loops".
+// A deletion has no content to hash, so it's marked with this instead.
+// Deliberately not a valid hex digest, so it can never collide with a
+// real content hash for the same path.
+export const DELETION_MARK = "deleted";
+
 export class WriteSuppressor {
   private pending = new Map<string, Set<string>>();
 

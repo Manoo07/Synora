@@ -41,6 +41,20 @@ function isExcluded(relativePath: string, ownPluginId: string): boolean {
   return relativePath === ownPluginPrefix || relativePath.startsWith(`${ownPluginPrefix}/`);
 }
 
+// A bundle's keys decide where its bytes get written, so a crafted one
+// could otherwise walk out of the config directory entirely with ".."
+// segments (or an absolute path), landing anywhere the app can write -
+// including back inside this plugin's own folder, which would defeat
+// the identity-overwrite rule above by spelling the path differently.
+// Everything the collector produces is a plain relative path, so
+// nothing legitimate is lost by refusing the rest.
+function isSafeRelativePath(relativePath: string): boolean {
+  if (relativePath.length === 0) return false;
+  if (relativePath.startsWith("/") || relativePath.startsWith("\\")) return false;
+  if (/^[a-zA-Z]:/.test(relativePath)) return false;
+  return relativePath.split(/[/\\]/).every((segment) => segment !== "" && segment !== "." && segment !== "..");
+}
+
 async function listAllFilesRecursive(adapter: MinimalDataAdapter, root: string): Promise<string[]> {
   const result: string[] = [];
   const pending = [root];
@@ -101,6 +115,7 @@ export async function applyPreferencesBundle(plugin: PreferencesBundleHost, bund
   const ownPluginId = plugin.manifest.id;
 
   for (const [relativePath, base64] of Object.entries(bundle)) {
+    if (!isSafeRelativePath(relativePath)) continue;
     if (isExcluded(relativePath, ownPluginId)) continue;
 
     const absolutePath = `${configDir}/${relativePath}`;
