@@ -5,7 +5,7 @@
 // the exact (path, content hash) pair the engine just wrote. The vault
 // event handler consumes the mark - once checked, it's gone, so a second
 // edit to the same path is never accidentally swallowed.
-// See architecture doc §6, "Prevent sync loops".
+// See architecture doc §5, "Echo suppression".
 // A deletion has no content to hash, so it's marked with this instead.
 // Deliberately not a valid hex digest, so it can never collide with a
 // real content hash for the same path.

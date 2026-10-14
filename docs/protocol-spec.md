@@ -1,5 +1,10 @@
 # Synora sync protocol — v0 specification
 
+This document defines the wire contract. For *why* the system is shaped
+this way — the constraints, the rejected alternatives, and the production
+failures that changed the design — see
+[`architecture.md`](./architecture.md).
+
 Status: draft for Phase 1 implementation. This is the contract the backend
 (`packages/backend`) implements and that the Obsidian plugin (Phase 2) must
 follow. Changing any of the wire formats below is a breaking protocol change

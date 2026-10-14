@@ -100,6 +100,14 @@ open for your phone to sync, or the other way around.
 - Not on the official Community Plugins list — install via BRAT (above).
 - Not built yet: a web-based editor, multi-vault management in one view.
 
+## For developers
+
+- [`docs/architecture.md`](docs/architecture.md) — how the system works and
+  why it makes the tradeoffs it does, including what has gone wrong in
+  production and what it changed. Start here before touching sync code.
+- [`docs/protocol-spec.md`](docs/protocol-spec.md) — the wire contract
+  between plugin and backend.
+
 ## Known limitations
 
 - **Storage is capped, not metered or billed.** Each account gets a free
