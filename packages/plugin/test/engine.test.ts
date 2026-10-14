@@ -4,7 +4,7 @@ import { SyncEngine } from "../src/sync/engine.js";
 import { SyncQueue } from "../src/sync/queue.js";
 import { LocalStateStore } from "../src/sync/local-state.js";
 import { WriteSuppressor, DELETION_MARK } from "../src/sync/suppressor.js";
-import { InMemoryKeyValueStore } from "../src/sync/storage.js";
+import { InMemoryKeyValueStore, InMemoryBlobStore } from "../src/sync/storage.js";
 import { generateVaultKey } from "../src/crypto/keys.js";
 import { MemoryVault } from "./fakes/memory-vault.js";
 import { FakeApiServer } from "./fakes/fake-server.js";
@@ -17,7 +17,7 @@ function buildEngine() {
   const api = new SynoraApiClient("http://fake");
   const vault = new MemoryVault();
   const store = new InMemoryKeyValueStore();
-  const queue = new SyncQueue(store);
+  const queue = new SyncQueue(store, new InMemoryBlobStore());
   const engine = new SyncEngine({
     api,
     vaultId: VAULT_ID,
@@ -76,7 +76,7 @@ describe("SyncEngine", () => {
       vaultId: VAULT_ID,
       vaultKey,
       vault: vaultA,
-      queue: new SyncQueue(storeA),
+      queue: new SyncQueue(storeA, new InMemoryBlobStore()),
       state: new LocalStateStore(storeA),
       suppressor: new WriteSuppressor(),
     });
@@ -93,7 +93,7 @@ describe("SyncEngine", () => {
       vaultId: VAULT_ID,
       vaultKey,
       vault: vaultB,
-      queue: new SyncQueue(storeB),
+      queue: new SyncQueue(storeB, new InMemoryBlobStore()),
       state: new LocalStateStore(storeB),
       suppressor: new WriteSuppressor(),
     });
@@ -113,7 +113,7 @@ describe("SyncEngine", () => {
       vaultId: VAULT_ID,
       vaultKey,
       vault: vaultA,
-      queue: new SyncQueue(storeA),
+      queue: new SyncQueue(storeA, new InMemoryBlobStore()),
       state: new LocalStateStore(storeA),
       suppressor: new WriteSuppressor(),
     });
@@ -133,7 +133,7 @@ describe("SyncEngine", () => {
       vaultId: VAULT_ID,
       vaultKey,
       vault: vaultB,
-      queue: new SyncQueue(storeB),
+      queue: new SyncQueue(storeB, new InMemoryBlobStore()),
       state: new LocalStateStore(storeB),
       suppressor: new WriteSuppressor(),
     });
@@ -165,7 +165,7 @@ describe("SyncEngine", () => {
           vaultId: VAULT_ID,
           vaultKey,
           vault,
-          queue: new SyncQueue(store),
+          queue: new SyncQueue(store, new InMemoryBlobStore()),
           state: new LocalStateStore(store),
           suppressor: new WriteSuppressor(),
         }),
@@ -209,7 +209,7 @@ describe("SyncEngine", () => {
           vaultId: VAULT_ID,
           vaultKey,
           vault,
-          queue: new SyncQueue(store),
+          queue: new SyncQueue(store, new InMemoryBlobStore()),
           state: new LocalStateStore(store),
           suppressor: new WriteSuppressor(),
         }),
@@ -259,7 +259,7 @@ describe("SyncEngine", () => {
           vaultId: VAULT_ID,
           vaultKey,
           vault,
-          queue: new SyncQueue(store),
+          queue: new SyncQueue(store, new InMemoryBlobStore()),
           state: new LocalStateStore(store),
           suppressor: new WriteSuppressor(),
         }),
@@ -330,7 +330,7 @@ describe("SyncEngine", () => {
           vaultId: VAULT_ID,
           vaultKey,
           vault,
-          queue: new SyncQueue(store),
+          queue: new SyncQueue(store, new InMemoryBlobStore()),
           state: new LocalStateStore(store),
           suppressor: new WriteSuppressor(),
         }),
@@ -384,7 +384,7 @@ describe("SyncEngine", () => {
           vaultId: VAULT_ID,
           vaultKey,
           vault,
-          queue: new SyncQueue(store),
+          queue: new SyncQueue(store, new InMemoryBlobStore()),
           state: new LocalStateStore(store),
           suppressor,
         }),
@@ -464,11 +464,10 @@ describe("SyncEngine", () => {
       logicalPath: "broken.md",
       fileId: "",
       operation: "updated",
-      envelopeBase64: btoa("not a real envelope, but fine for this fake server"),
       ciphertextHash: "deadbeef",
       sizeBytes: 10,
       enqueuedAt: Date.now(),
-    });
+    }, new TextEncoder().encode("not a real envelope, but fine for this fake server"));
     await engine.handleLocalChange("ok.md", "created", new TextEncoder().encode("fine"));
 
     const { failed } = await engine.flush();

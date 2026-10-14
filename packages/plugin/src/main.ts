@@ -4,6 +4,7 @@ import { ApiError, SynoraApiClient } from "./api/client.js";
 import { obsidianTransport } from "./api/obsidian-transport.js";
 import { SyncEngine } from "./sync/engine.js";
 import { SyncQueue } from "./sync/queue.js";
+import { AdapterBlobStore } from "./sync/blob-store.js";
 import { LocalStateStore } from "./sync/local-state.js";
 import { WriteSuppressor, DELETION_MARK } from "./sync/suppressor.js";
 import type { KeyValueStore } from "./sync/storage.js";
@@ -43,6 +44,9 @@ class PluginDataStore implements KeyValueStore {
 }
 
 const DEBOUNCE_MS = 1500;
+// Just under the server's own 100MB per-upload cap, leaving room for
+// the encryption envelope's overhead on top of the file's own bytes.
+const MAX_SYNC_FILE_BYTES = 95 * 1024 * 1024;
 const IGNORED_PREFIXES = [".obsidian/"];
 const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "svg", "webp", "bmp"];
 
@@ -54,6 +58,9 @@ export default class SynoraPlugin extends Plugin {
   private vaultKey?: Uint8Array;
   private suppressor = new WriteSuppressor();
   private pendingDebounces = new Map<string, ReturnType<typeof setTimeout>>();
+  // Paths already reported as too large, so editing one doesn't put the
+  // same notice up on every save.
+  private oversizeWarned = new Set<string>();
   private statusBarEl?: HTMLElement;
   private statusIconEl?: HTMLElement;
   private statusTextEl?: HTMLElement;
@@ -171,12 +178,29 @@ export default class SynoraPlugin extends Plugin {
     this.vaultKey = unwrapVaultKey(base64ToBytes(wrappedKey), base64ToBytes(deviceSecretKeyB64));
     this.needsVaultKeyRecovery = false;
 
+    const blobs = new AdapterBlobStore(
+      this.app.vault.adapter,
+      `${this.app.vault.configDir}/plugins/${this.manifest.id}/pending`,
+    );
+    const queue = new SyncQueue(store, blobs);
+    // Moves across anything queued by a version that stored payloads
+    // inline, then clears payloads orphaned by a crash between the
+    // queue's two writes. Migration first: pruning looks at which ops
+    // exist, and a half-migrated op would have its payload taken for an
+    // orphan.
+    await queue
+      .migrateLegacyPayloads()
+      .then(() => queue.pruneOrphanedPayloads())
+      .catch((err) => {
+        console.error("Synora: could not prepare the pending queue", err);
+      });
+
     this.engine = new SyncEngine({
       api: this.api,
       vaultId,
       vaultKey: this.vaultKey,
       vault: new ObsidianVaultAdapter(this.app.vault),
-      queue: new SyncQueue(store),
+      queue,
       state: new LocalStateStore(store),
       suppressor: this.suppressor,
     });
@@ -219,6 +243,23 @@ export default class SynoraPlugin extends Plugin {
     const content = new Uint8Array(await this.app.vault.readBinary(current));
     const hash = toHex(sha256(content));
     if (this.suppressor.shouldSuppress(file.path, hash)) return;
+
+    // The server rejects anything over its own upload cap, so without
+    // this the file is encrypted and written to the pending queue in
+    // full before the upload fails - real work and real disk churn for
+    // something that was never going to be accepted.
+    if (content.byteLength > MAX_SYNC_FILE_BYTES) {
+      if (!this.oversizeWarned.has(file.path)) {
+        this.oversizeWarned.add(file.path);
+        new Notice(
+          `Synora: "${file.path}" is ${Math.round(content.byteLength / (1024 * 1024))}MB, over the ` +
+            `${Math.round(MAX_SYNC_FILE_BYTES / (1024 * 1024))}MB limit, so it won't be synced.`,
+          10000,
+        );
+      }
+      return;
+    }
+    this.oversizeWarned.delete(file.path);
 
     await this.engine.handleLocalChange(file.path, operation, content);
   }

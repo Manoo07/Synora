@@ -110,7 +110,6 @@ export class SyncEngine {
       fileId,
       baseVersionId: existing?.currentVersionId ?? undefined,
       operation,
-      envelopeBase64: toBase64(encoded),
       ciphertextHash,
       sizeBytes: encoded.byteLength,
       enqueuedAt: Date.now(),
@@ -130,9 +129,9 @@ export class SyncEngine {
     // device, no other device involved at all.
     const existingPending = (await queue.list()).find((pending) => pending.logicalPath === path);
     if (existingPending) {
-      await queue.replace(existingPending.idempotencyKey, op);
+      await queue.replace(existingPending.idempotencyKey, op, encoded);
     } else {
-      await queue.enqueue(op);
+      await queue.enqueue(op, encoded);
     }
     // Optimistically record the content hash now so a rapid second edit to
     // the same path before this op uploads is recognized as a real change
@@ -165,7 +164,15 @@ export class SyncEngine {
 
     for (const op of await queue.list()) {
       try {
-        const bytes = fromBase64(op.envelopeBase64);
+        const bytes = await queue.readPayload(op.idempotencyKey);
+        if (!bytes) {
+          // Its payload is gone, so this op can never be sent - retrying
+          // it would just block the queue behind it forever.
+          console.error(`Synora: dropping "${op.logicalPath}" - its queued payload is missing`);
+          await queue.remove(op.idempotencyKey);
+          failed.push(op.logicalPath);
+          continue;
+        }
         const upload = await api.requestUpload(vaultId);
         await api.putBlob(upload.uploadUrl, bytes);
 
@@ -201,7 +208,7 @@ export class SyncEngine {
         // to preserve both - download the winning remote version into the
         // vault at its normal path, and re-file our pending edit as an
         // explicit conflict copy rather than attempting a blind overwrite.
-        await this.resolveConflict(op, result.currentFileId, result.currentVersionId);
+        await this.resolveConflict(op, bytes, result.currentFileId, result.currentVersionId);
       } catch (err) {
         console.error(`Synora: could not sync "${op.logicalPath}"`, err);
         if (err instanceof ApiError && err.status >= 400 && err.status < 500) {
@@ -218,25 +225,26 @@ export class SyncEngine {
 
   private async resolveConflict(
     op: PendingOp,
+    localPayload: Uint8Array,
     remoteFileId: string,
     remoteVersionId: string | null,
   ): Promise<void> {
     const { api, vaultId, vaultKey, queue, state, vault, suppressor } = this.deps;
     if (!remoteVersionId) {
-      await this.fileAsConflictCopy(op);
+      await this.fileAsConflictCopy(op, localPayload);
       return;
     }
 
     const remoteVersion = await this.lookupVersion(remoteVersionId);
     if (!remoteVersion?.blobKey) {
-      await this.fileAsConflictCopy(op);
+      await this.fileAsConflictCopy(op, localPayload);
       return;
     }
 
     const remoteManifest = decodeManifest(
       decryptEnvelope(vaultKey, decodeEnvelope(await api.getObject(vaultId, remoteVersion.blobKey))),
     );
-    const localManifest = decodeManifest(decryptEnvelope(vaultKey, decodeEnvelope(fromBase64(op.envelopeBase64))));
+    const localManifest = decodeManifest(decryptEnvelope(vaultKey, decodeEnvelope(localPayload)));
 
     const merged = await this.tryTextMerge(op, remoteManifest.content, localManifest.content);
     if (merged) {
@@ -253,11 +261,10 @@ export class SyncEngine {
         fileId: remoteFileId,
         baseVersionId: remoteVersionId,
         operation: "updated",
-        envelopeBase64: toBase64(envelope),
         ciphertextHash: toHex(sha256(envelope)),
         sizeBytes: envelope.byteLength,
         enqueuedAt: Date.now(),
-      });
+      }, envelope);
       await state.upsert({ fileId: remoteFileId, logicalPath: op.logicalPath, currentVersionId: remoteVersionId, contentHash: hash });
       return;
     }
@@ -269,7 +276,7 @@ export class SyncEngine {
     await vault.write(op.logicalPath, remoteManifest.content);
     await state.upsert({ fileId: remoteFileId, logicalPath: op.logicalPath, currentVersionId: remoteVersionId, contentHash: hash });
 
-    await this.fileAsConflictCopy(op);
+    await this.fileAsConflictCopy(op, localPayload);
   }
 
   // A version that's genuinely gone just means we can't merge against
@@ -307,7 +314,7 @@ export class SyncEngine {
     return new TextEncoder().encode(result.lines.join("\n"));
   }
 
-  private async fileAsConflictCopy(op: PendingOp): Promise<void> {
+  private async fileAsConflictCopy(op: PendingOp, localPayload: Uint8Array): Promise<void> {
     const { vaultKey, queue, state, vault, suppressor } = this.deps;
     // File our edit as a sibling conflict copy instead of retrying against
     // the (now also stale) base - the user reconciles the two by hand.
@@ -315,7 +322,7 @@ export class SyncEngine {
     // baked in (it's part of the encrypted payload, not just a queue
     // field), so this re-encrypts a fresh envelope under the new path
     // rather than just renaming the queue entry.
-    const ownContent = decodeManifest(decryptEnvelope(vaultKey, decodeEnvelope(fromBase64(op.envelopeBase64)))).content;
+    const ownContent = decodeManifest(decryptEnvelope(vaultKey, decodeEnvelope(localPayload))).content;
     const copyPath = conflictPath(op.logicalPath);
     const copyHash = toHex(sha256(ownContent));
     suppressor.markApplied(copyPath, copyHash);
@@ -328,11 +335,10 @@ export class SyncEngine {
       idempotencyKey: crypto.randomUUID(),
       logicalPath: copyPath,
       operation: "created",
-      envelopeBase64: toBase64(copyEnvelope),
       ciphertextHash: toHex(sha256(copyEnvelope)),
       sizeBytes: copyEnvelope.byteLength,
       enqueuedAt: Date.now(),
-    });
+    }, copyEnvelope);
     await state.upsert({ fileId: "", logicalPath: copyPath, currentVersionId: null, contentHash: copyHash });
   }
 
@@ -410,15 +416,3 @@ export class SyncEngine {
   }
 }
 
-function toBase64(bytes: Uint8Array): string {
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary);
-}
-
-function fromBase64(b64: string): Uint8Array {
-  const binary = atob(b64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes;
-}

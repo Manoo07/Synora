@@ -47,4 +47,8 @@ export class MemoryAdapter implements MinimalDataAdapter {
   async writeBinary(path: string, data: ArrayBuffer): Promise<void> {
     this.files.set(path, new Uint8Array(data));
   }
+
+  async remove(path: string): Promise<void> {
+    this.files.delete(path);
+  }
 }
