@@ -701,6 +701,60 @@ describe("SyncEngine", () => {
     expect(await b.pendingDownloadCount()).toBe(0);
   });
 
+  it("uploads without asking the server for a key first, and overlaps them", async () => {
+    const { engine } = buildEngine();
+    for (let i = 0; i < 8; i++) {
+      await engine.handleLocalChange(`note-${i}.md`, "created", new TextEncoder().encode(`body ${i}`));
+    }
+
+    const realFetch = globalThis.fetch;
+    let slotRequests = 0;
+    let inFlight = 0;
+    let peakInFlight = 0;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const isUpload = url.includes("/uploads/");
+      // The old slot endpoint: a whole round trip whose only product
+      // was a random id this side can pick itself.
+      if (url.endsWith("/uploads") && (init?.method ?? "GET") === "POST") slotRequests++;
+      if (isUpload) {
+        inFlight++;
+        peakInFlight = Math.max(peakInFlight, inFlight);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      try {
+        return await realFetch(input as RequestInfo, init);
+      } finally {
+        if (isUpload) inFlight--;
+      }
+    }) as typeof fetch;
+
+    try {
+      await engine.flush();
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+
+    expect(slotRequests).toBe(0);
+    // Small notes, so they go through the concurrent path rather than
+    // the one-at-a-time route reserved for big attachments.
+    expect(peakInFlight).toBeGreaterThan(1);
+  });
+
+  it("reports upload progress so a long backlog can show an ETA", async () => {
+    const { engine } = buildEngine();
+    for (let i = 0; i < 5; i++) {
+      await engine.handleLocalChange(`note-${i}.md`, "created", new TextEncoder().encode(`body ${i}`));
+    }
+
+    const seen: Array<{ doneCount: number; totalCount: number }> = [];
+    await engine.flush((p) => seen.push({ doneCount: p.doneCount, totalCount: p.totalCount }));
+
+    expect(seen).toHaveLength(5);
+    expect(seen.every((p) => p.totalCount === 5)).toBe(true);
+    expect(Math.max(...seen.map((p) => p.doneCount))).toBe(5);
+  });
+
   it("never sends an empty-string fileId for a second edit to a not-yet-synced file", async () => {
     const { engine, queue } = buildEngine();
 

@@ -196,6 +196,15 @@ export class SynoraApiClient {
     });
   }
 
+  // Uploads straight to a key this client picked, skipping the
+  // round trip that used to exist only to be told a random id.
+  putBlobAt(vaultId: string, blobKey: string, bytes: Uint8Array) {
+    return this.request<{ blobKey: string; sizeBytes: number; ciphertextHash: string }>(
+      `/v1/vaults/${vaultId}/uploads/${encodeURIComponent(blobKey)}`,
+      { method: "PUT", raw: bytes },
+    );
+  }
+
   async putBlob(uploadUrl: string, bytes: Uint8Array) {
     return this.request<{ blobKey: string; sizeBytes: number; ciphertextHash: string }>(uploadUrl, {
       method: "PUT",

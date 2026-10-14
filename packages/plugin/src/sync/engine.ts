@@ -42,6 +42,33 @@ function conflictPath(path: string): string {
   return `${stem} (conflict ${ts})${ext}`;
 }
 
+// How many uploads overlap, and the size above which one runs alone.
+// Four 25MB attachments in flight is 100MB of buffers held at once.
+const UPLOAD_CONCURRENCY = 4;
+const LARGE_UPLOAD_BYTES = 4 * 1024 * 1024;
+
+export interface FlushProgress {
+  doneCount: number;
+  totalCount: number;
+  doneBytes: number;
+  totalBytes: number;
+}
+
+// Runs `fn` over `items`, at most `limit` at a time. Workers pull from
+// a shared cursor rather than being handed fixed slices, so one slow
+// upload cannot leave the others idle behind it.
+async function runWithConcurrency<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    for (;;) {
+      const index = cursor++;
+      if (index >= items.length) return;
+      await fn(items[index]!);
+    }
+  });
+  await Promise.all(workers);
+}
+
 export interface SyncEngineDeps {
   api: SynoraApiClient;
   vaultId: string;
@@ -183,29 +210,80 @@ export class SyncEngine {
   // than retried forever) and reported; anything else (network hiccup,
   // 5xx) is left queued to retry next cycle, and the loop still moves on
   // to the next op either way.
-  async flush(): Promise<{ failed: string[] }> {
+  async flush(onProgress?: (progress: FlushProgress) => void): Promise<{ failed: string[] }> {
     const { api, vaultId, queue } = this.deps;
     const failed: string[] = [];
+    const ops = await queue.list();
+    if (ops.length === 0) return { failed };
 
-    for (const op of await queue.list()) {
+    // Uploads run several at a time; commits stay strictly sequential.
+    //
+    // The split is deliberate. Uploading touches nothing shared - it
+    // reads one payload and PUTs it - so it parallelises safely.
+    // Committing mutates the queue and the local state store, both of
+    // which are read-modify-write over a single JSON blob: run two at
+    // once and one's write silently erases the other's, which could
+    // drop a queued conflict copy. The slow part is the upload anyway.
+    const blobKeys = new Map<string, string>();
+    const payloadMissing: PendingOp[] = [];
+    const totalBytes = ops.reduce((sum, op) => sum + op.sizeBytes, 0);
+    let doneBytes = 0;
+    let doneCount = 0;
+
+    const upload = async (op: PendingOp): Promise<void> => {
+      const bytes = await queue.readPayload(op.idempotencyKey);
+      if (!bytes) {
+        payloadMissing.push(op);
+      } else {
+        try {
+          // The key is generated here rather than asked for. The server's
+          // old upload-slot endpoint did nothing but return a random id,
+          // so it cost a whole extra round trip per file to learn a value
+          // this side could just as well pick; the PUT validates that the
+          // key belongs to this vault either way.
+          const blobKey = `${vaultId}/${crypto.randomUUID()}`;
+          await api.putBlobAt(vaultId, blobKey, bytes);
+          blobKeys.set(op.idempotencyKey, blobKey);
+        } catch (err) {
+          // Leave it queued and unuploaded - the commit phase skips it
+          // and the next cycle tries again.
+          console.error(`Synora: upload failed for "${op.logicalPath}"`, err);
+        }
+      }
+      doneCount++;
+      doneBytes += op.sizeBytes;
+      onProgress?.({ doneCount, totalCount: ops.length, doneBytes, totalBytes });
+    };
+
+    // Big attachments go one at a time: four 25MB uploads in flight
+    // means 100MB of buffers held at once, which is a real risk on a
+    // phone. Notes are small enough that the round trip dominates, so
+    // those are the ones worth overlapping.
+    const large = ops.filter((op) => op.sizeBytes > LARGE_UPLOAD_BYTES);
+    const small = ops.filter((op) => op.sizeBytes <= LARGE_UPLOAD_BYTES);
+    await runWithConcurrency(large, 1, upload);
+    await runWithConcurrency(small, UPLOAD_CONCURRENCY, upload);
+
+    for (const op of payloadMissing) {
+      // Its payload is gone, so this op can never be sent - retrying it
+      // would just block the queue behind it forever.
+      console.error(`Synora: dropping "${op.logicalPath}" - its queued payload is missing`);
+      await queue.remove(op.idempotencyKey);
+      failed.push(op.logicalPath);
+    }
+
+    for (const op of ops) {
+      const blobKey = blobKeys.get(op.idempotencyKey);
+      if (!blobKey) continue; // never uploaded; stays queued for next cycle
       try {
         const bytes = await queue.readPayload(op.idempotencyKey);
-        if (!bytes) {
-          // Its payload is gone, so this op can never be sent - retrying
-          // it would just block the queue behind it forever.
-          console.error(`Synora: dropping "${op.logicalPath}" - its queued payload is missing`);
-          await queue.remove(op.idempotencyKey);
-          failed.push(op.logicalPath);
-          continue;
-        }
-        const upload = await api.requestUpload(vaultId);
-        await api.putBlob(upload.uploadUrl, bytes);
+        if (!bytes) continue;
 
         const result = await api.commit(vaultId, {
           fileId: op.fileId,
           baseVersionId: op.baseVersionId,
           parentVersionIds: op.parentVersionIds,
-          blobKey: upload.uploadId,
+          blobKey,
           ciphertextHash: op.ciphertextHash,
           sizeBytes: op.sizeBytes,
           operation: op.operation,

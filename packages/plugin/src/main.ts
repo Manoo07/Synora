@@ -387,7 +387,14 @@ export default class SynoraPlugin extends Plugin {
     try {
       void this.updateStatusBar("syncing");
       const pendingBefore = await this.engine.pendingUploadCount();
-      const { failed } = await this.engine.flush();
+      const startedAt = Date.now();
+      const { failed } = await this.engine.flush((progress) => {
+        const eta = SynoraPlugin.formatEta(progress.doneBytes, progress.totalBytes, startedAt);
+        void this.updateStatusBar(
+          "syncing",
+          `Uploading ${progress.doneCount}/${progress.totalCount}${eta ? ` · ${eta}` : ""}`,
+        );
+      });
       this.notifyFailed(failed);
       const { skipped, applied } = await this.engine.pull();
       this.notifySkipped(skipped);
@@ -433,7 +440,22 @@ export default class SynoraPlugin extends Plugin {
   // inline SVG, unlike a plain unicode glyph, which depends on the
   // platform's emoji font and - confirmed live on Android - can render as
   // a broken/unrelated glyph instead of the intended one).
-  private async updateStatusBar(state: "idle" | "syncing" | "error"): Promise<void> {
+  // Turns progress so far into "about N left". Uses the rate measured
+  // over this run rather than a fixed guess, because the honest answer
+  // depends entirely on the connection: the same backlog is a minute on
+  // a laptop and twenty on a phone tethered to mobile data.
+  private static formatEta(doneBytes: number, totalBytes: number, startedAt: number): string | undefined {
+    const elapsed = Date.now() - startedAt;
+    // Too early to say anything trustworthy. A number that lurches from
+    // "3 hours" to "20 seconds" is worse than no number.
+    if (elapsed < 1500 || doneBytes <= 0 || doneBytes >= totalBytes) return undefined;
+    const remainingMs = ((totalBytes - doneBytes) / doneBytes) * elapsed;
+    if (remainingMs < 10_000) return "a few seconds left";
+    if (remainingMs < 90_000) return `about ${Math.round(remainingMs / 1000)}s left`;
+    return `about ${Math.round(remainingMs / 60_000)}m left`;
+  }
+
+  private async updateStatusBar(state: "idle" | "syncing" | "error", detail?: string): Promise<void> {
     if (!this.statusBarEl || !this.statusIconEl || !this.statusTextEl) return;
     this.statusBarEl.removeClass("is-error", "is-synced");
     this.statusIconEl.removeClass("is-spinning");
@@ -449,7 +471,7 @@ export default class SynoraPlugin extends Plugin {
     if (state === "syncing") {
       setIcon(this.statusIconEl, "refresh-cw");
       this.statusIconEl.addClass("is-spinning");
-      this.statusTextEl.setText("Syncing…");
+      this.statusTextEl.setText(detail ?? "Syncing…");
       return;
     }
     if (state === "error") {

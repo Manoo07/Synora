@@ -1,7 +1,7 @@
 {
   "id": "synora-sync",
   "name": "Synora Sync",
-  "version": "0.1.42",
+  "version": "0.1.43",
   "minAppVersion": "1.4.0",
   "description": "End-to-end encrypted sync for your vault, coordinated by your Synora server.",
   "author": "Synora",
