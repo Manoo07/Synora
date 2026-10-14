@@ -1,0 +1,1 @@
+CREATE INDEX IF NOT EXISTS "change_events_file_idx" ON "change_events" USING btree ("file_id","sequence");

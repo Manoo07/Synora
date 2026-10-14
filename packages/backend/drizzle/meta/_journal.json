@@ -57,6 +57,13 @@
       "when": 1791905834961,
       "tag": "0007_backfill_device_limit",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1791958505953,
+      "tag": "0008_change_events_file_idx",
+      "breakpoints": true
     }
   ]
 }

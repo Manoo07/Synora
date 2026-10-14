@@ -113,6 +113,15 @@ export const changeEvents = pgTable("change_events", {
 }, (t) => ({
   pk: uniqueIndex("change_events_pk").on(t.vaultId, t.sequence),
   idemIdx: uniqueIndex("change_events_idem_idx").on(t.vaultId, t.idempotencyKey),
+  // Serves garbage collection, which asks "is there a later event for
+  // this same file?" once per candidate version. The feed is only ever
+  // read by sequence during normal syncing, so nothing needed a
+  // file-keyed index before - and without one each of those questions
+  // scans the whole feed, making collection quadratic in a vault's
+  // history and effectively unable to finish on an active vault.
+  // Equality on file_id then a range on sequence is exactly the shape
+  // those subqueries use.
+  fileIdx: index("change_events_file_idx").on(t.fileId, t.sequence),
 }));
 
 export const deviceCursors = pgTable("device_cursors", {
