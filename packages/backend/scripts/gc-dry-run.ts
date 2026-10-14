@@ -8,14 +8,10 @@
 // Takes no R2 binding, because a dry run never touches blob storage.
 import { openDb } from "../src/db/client.js";
 import { collectGarbage, DEFAULT_RETENTION_DAYS } from "../src/gc.js";
+import { resolveDatabaseUrl } from "./env.js";
 import type { AppBindings } from "../src/context.js";
 
-const connectionString = process.env.DATABASE_URL;
-if (!connectionString) {
-  console.error("DATABASE_URL is required");
-  process.exit(1);
-}
-
+const connectionString = resolveDatabaseUrl("gc:dry-run");
 const retentionDays = Number(process.env.GC_RETENTION_DAYS ?? DEFAULT_RETENTION_DAYS);
 const { db, close } = openDb(connectionString);
 

@@ -1,8 +1,9 @@
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
+import { resolveDatabaseUrl } from "./env.js";
 
-const connectionString = process.env.DATABASE_URL ?? "postgres://synora:synora@localhost:5435/synora";
+const connectionString = resolveDatabaseUrl("db:migrate");
 
 const sql = postgres(connectionString, { max: 1 });
 const db = drizzle(sql);
@@ -10,4 +11,6 @@ const db = drizzle(sql);
 await migrate(db, { migrationsFolder: "./drizzle" });
 await sql.end();
 
-console.log("Migrations applied.");
+// Names the target again, so the success line can never be read as
+// "applied to production" when it went somewhere else.
+console.log(`Migrations applied to ${new URL(connectionString).hostname}.`);

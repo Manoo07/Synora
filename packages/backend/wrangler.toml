@@ -8,12 +8,12 @@ compatibility_flags = ["nodejs_compat"]
 # save writes a whole new encrypted copy, and deleting a file adds one
 # rather than freeing any. See src/gc.ts.
 #
-# HELD until a dry run has been read against real data: everything
-# already past the retention window becomes collectable on the very
-# first run, and deletion has no undo. `npm run gc:dry-run` reports
-# what it would remove. Uncomment to arm it.
-# [triggers]
-# crons = ["17 3 * * *"]
+# Armed after a dry run against production reported nothing collectable:
+# the whole database is days old against a 30 day retention window, so
+# the first run with real work to do is weeks away. `npm run gc:dry-run`
+# reports what a run would remove, without removing it.
+[triggers]
+crons = ["17 3 * * *"]
 
 [[r2_buckets]]
 binding = "BUCKET"
