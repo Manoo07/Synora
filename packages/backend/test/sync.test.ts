@@ -1,7 +1,7 @@
 import { beforeEach, afterAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { app } from "../src/index.js";
-import { users } from "../src/db/schema.js";
+import { users, devices } from "../src/db/schema.js";
 import { resetDb, testBindings, closeTestDb } from "./setup.js";
 import { registerUser, createVault, requestUpload, putBlob, commit } from "./helpers.js";
 
@@ -167,6 +167,33 @@ describe("sync protocol", () => {
     );
     expect(res.status).toBe(200);
     expect(await res.text()).toBe("hello vault");
+  });
+
+  it("tells a non-member apart from an inactive device, since the client branches on which", async () => {
+    const bindings = testBindings();
+    const alice = await registerUser(bindings, "alice@example.com");
+    const bob = await registerUser(bindings, "bob@example.com");
+    const vault = await createVault(bindings, alice.accessToken);
+
+    // Bob is a perfectly valid, active device - just not in this vault.
+    // Must be 403: the plugin reads that as "this device needs the vault
+    // key" and offers recovery. A 401 would instead clear the session.
+    const outsider = await app.request(
+      `/v1/vaults/${vault.id}/changes`,
+      { headers: { authorization: `Bearer ${bob.accessToken}` } },
+      bindings,
+    );
+    expect(outsider.status).toBe(403);
+
+    // Alice is a member, but her device is no longer active. Must be
+    // 401, which is what makes the plugin re-authenticate.
+    await bindings.DB.update(devices).set({ status: "revoked" }).where(eq(devices.id, alice.deviceId));
+    const revoked = await app.request(
+      `/v1/vaults/${vault.id}/changes`,
+      { headers: { authorization: `Bearer ${alice.accessToken}` } },
+      bindings,
+    );
+    expect(revoked.status).toBe(401);
   });
 
   it("looks a version up by id, regardless of how long the vault's history is", async () => {

@@ -47,6 +47,14 @@ const DEBOUNCE_MS = 1500;
 // Just under the server's own 100MB per-upload cap, leaving room for
 // the encryption envelope's overhead on top of the file's own bytes.
 const MAX_SYNC_FILE_BYTES = 95 * 1024 * 1024;
+// How many consecutive cycles that find nothing in either direction
+// before the loop starts skipping some, and how far apart those cycles
+// are allowed to drift. At the default 30s interval that means the full
+// rate for the first two idle minutes, easing out to one check every
+// five - so a vault in active use never slows down, and one nobody has
+// touched in an hour costs a twelfth of what it used to.
+const IDLE_CYCLES_BEFORE_BACKOFF = 4;
+const MAX_IDLE_INTERVAL_SECONDS = 300;
 const IGNORED_PREFIXES = [".obsidian/"];
 const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "svg", "webp", "bmp"];
 
@@ -61,6 +69,9 @@ export default class SynoraPlugin extends Plugin {
   // Paths already reported as too large, so editing one doesn't put the
   // same notice up on every save.
   private oversizeWarned = new Set<string>();
+  // Idle backoff state - see syncCycle() and wakeSync().
+  private idleCycles = 0;
+  private cyclesToSkip = 0;
   private statusBarEl?: HTMLElement;
   private statusIconEl?: HTMLElement;
   private statusTextEl?: HTMLElement;
@@ -123,7 +134,7 @@ export default class SynoraPlugin extends Plugin {
     );
 
     this.registerInterval(
-      window.setInterval(() => void this.syncCycle(), this.settings.syncIntervalSeconds * 1000),
+      window.setInterval(() => this.scheduledSyncCycle(), this.settings.syncIntervalSeconds * 1000),
     );
 
     this.applyIconPack();
@@ -233,6 +244,7 @@ export default class SynoraPlugin extends Plugin {
       // billed against the account's storage.
       if (this.suppressor.shouldSuppress(file.path, DELETION_MARK)) return;
       await this.engine.handleLocalChange(file.path, "deleted");
+      this.wakeSync();
       return;
     }
 
@@ -262,6 +274,7 @@ export default class SynoraPlugin extends Plugin {
     this.oversizeWarned.delete(file.path);
 
     await this.engine.handleLocalChange(file.path, operation, content);
+    this.wakeSync();
   }
 
   // Obsidian's rename event has a different shape ((file, oldPath)) than
@@ -324,6 +337,44 @@ export default class SynoraPlugin extends Plugin {
     if (this.suppressor.shouldSuppress(file.path, hash)) return;
 
     await this.engine.handleLocalRename(oldPath, file.path, content);
+    this.wakeSync();
+  }
+
+  // Back to the full polling rate, from the next cycle on. Called
+  // whenever this device does something that needs pushing, so a local
+  // edit never waits out a backoff that was only there because nothing
+  // was happening.
+  private wakeSync(): void {
+    this.idleCycles = 0;
+    this.cyclesToSkip = 0;
+  }
+
+  // Grows the gap between cycles while both directions stay empty, up to
+  // a ceiling. The ceiling is what bounds how stale a quiet vault can
+  // get before a remote change shows up.
+  private recordCycleOutcome(didWork: boolean): void {
+    if (didWork) {
+      this.wakeSync();
+      return;
+    }
+    this.idleCycles++;
+    if (this.idleCycles < IDLE_CYCLES_BEFORE_BACKOFF) return;
+    const interval = Math.max(1, this.settings.syncIntervalSeconds);
+    const maxSkips = Math.max(0, Math.ceil(MAX_IDLE_INTERVAL_SECONDS / interval) - 1);
+    const grown = this.idleCycles - IDLE_CYCLES_BEFORE_BACKOFF + 1;
+    this.cyclesToSkip = Math.min(grown, maxSkips);
+  }
+
+  // The interval's entry point, and the only one that can be skipped.
+  // Every explicit trigger - startup, attach, resuming a paused file -
+  // calls syncCycle() directly and so is never swallowed by a backoff
+  // that exists only because nothing was happening.
+  private scheduledSyncCycle(): void {
+    if (this.cyclesToSkip > 0) {
+      this.cyclesToSkip--;
+      return;
+    }
+    void this.syncCycle();
   }
 
   async syncCycle(): Promise<void> {
@@ -335,10 +386,12 @@ export default class SynoraPlugin extends Plugin {
     this.isSyncing = true;
     try {
       void this.updateStatusBar("syncing");
+      const pendingBefore = await this.engine.pendingUploadCount();
       const { failed } = await this.engine.flush();
       this.notifyFailed(failed);
-      const { skipped } = await this.engine.pull();
+      const { skipped, applied } = await this.engine.pull();
       this.notifySkipped(skipped);
+      this.recordCycleOutcome(pendingBefore > 0 || applied > 0);
       await this.updateStatusBar("idle");
     } catch (err) {
       console.error("Synora: sync cycle failed", err);

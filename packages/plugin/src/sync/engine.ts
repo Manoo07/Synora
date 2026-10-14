@@ -354,10 +354,12 @@ export class SyncEngine {
   // permanently blocking sync. Now a failure is skipped (with `since`
   // still advancing past it, so it's never retried into the same dead
   // end) rather than taking down everything behind it in the feed.
-  async pull(): Promise<{ skipped: string[] }> {
+  async pull(): Promise<{ skipped: string[]; applied: number }> {
     const { api, vaultId, vaultKey, state, vault, suppressor } = this.deps;
     let since = await state.getLastAppliedSequence();
+    const startedAt = since;
     const skipped: string[] = [];
+    let applied = 0;
 
     for (;;) {
       const page = await api.getChanges(vaultId, since);
@@ -401,18 +403,25 @@ export class SyncEngine {
           console.error(`Synora: could not apply change for "${change.fileId}"`, err);
           skipped.push(change.fileId);
         }
+        applied++;
         since = change.sequence;
         await state.setLastAppliedSequence(since);
       }
       if (!page.hasMore) break;
     }
 
-    await api.ack(vaultId, since).catch(() => {
-      // Best-effort: the next status check will simply show a larger
-      // pending count until an ack succeeds. Not fatal to correctness.
-    });
+    // Only when the cursor actually moved. An idle vault would otherwise
+    // re-send the same sequence number every interval forever, and since
+    // each ack is an authenticated write, that was roughly half of all
+    // the database traffic this system produced while doing nothing.
+    if (since !== startedAt) {
+      await api.ack(vaultId, since).catch(() => {
+        // Best-effort: the next status check will simply show a larger
+        // pending count until an ack succeeds. Not fatal to correctness.
+      });
+    }
 
-    return { skipped };
+    return { skipped, applied };
   }
 }
 

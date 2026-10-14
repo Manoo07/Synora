@@ -435,6 +435,30 @@ describe("SyncEngine", () => {
     expect(changes.at(-1)!.fileId).not.toBe(firstFileId);
   });
 
+  it("does not ack an idle pull, which would be a write per device per interval forever", async () => {
+    const { engine } = buildEngine();
+    const acks: unknown[] = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes("/acks")) acks.push(input);
+      return realFetch(input as RequestInfo, init);
+    }) as typeof fetch;
+
+    try {
+      await engine.handleLocalChange("note.md", "created", new TextEncoder().encode("hello"));
+      await engine.flush();
+
+      await engine.pull(); // applies our own change - cursor moves, ack expected
+      expect(acks).toHaveLength(1);
+
+      await engine.pull(); // nothing new
+      await engine.pull(); // still nothing
+      expect(acks).toHaveLength(1);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
   it("never sends an empty-string fileId for a second edit to a not-yet-synced file", async () => {
     const { engine, queue } = buildEngine();
 

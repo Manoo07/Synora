@@ -3,11 +3,15 @@ import { eq, and, gt, sql, desc } from "drizzle-orm";
 import { z } from "zod";
 import type { AppEnv } from "../context.js";
 import { files, fileVersions, changeEvents, deviceCursors, storageObjects, vaults, users } from "../db/schema.js";
-import { requireAuth, requireVaultAccess } from "../auth/middleware.js";
+import { requireAccountAuth, requireActiveDeviceVaultAccess } from "../auth/middleware.js";
 import { badRequest, conflict, forbidden, notFound, payloadTooLarge, quotaExceeded } from "../lib/errors.js";
 
 export const syncRoutes = new Hono<AppEnv>();
-syncRoutes.use("*", requireAuth);
+// Account-level only here: every route below calls
+// requireActiveDeviceVaultAccess, which checks the device is active in
+// the same query as vault membership. Keeping requireAuth as well would
+// just re-read the device row on every request.
+syncRoutes.use("*", requireAccountAuth);
 
 // Generous for a notes vault (covers large attachments/PDFs/images) while
 // still bounding the worst case of a single upload - uploads are
@@ -24,14 +28,14 @@ const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
 
 syncRoutes.post("/:vaultId/uploads", async (c) => {
   const vaultId = c.req.param("vaultId");
-  await requireVaultAccess(c, vaultId);
+  await requireActiveDeviceVaultAccess(c, vaultId);
   const blobKey = `${vaultId}/${crypto.randomUUID()}`;
   return c.json({ uploadId: blobKey, uploadUrl: `/v1/vaults/${vaultId}/uploads/${encodeURIComponent(blobKey)}` });
 });
 
 syncRoutes.put("/:vaultId/uploads/:blobKey", async (c) => {
   const vaultId = c.req.param("vaultId");
-  await requireVaultAccess(c, vaultId);
+  await requireActiveDeviceVaultAccess(c, vaultId);
   const blobKey = decodeURIComponent(c.req.param("blobKey"));
   if (!blobKey.startsWith(`${vaultId}/`)) throw badRequest("Blob key does not belong to this vault");
 
@@ -72,7 +76,7 @@ const commitSchema = z.object({
 
 syncRoutes.post("/:vaultId/commits", async (c) => {
   const vaultId = c.req.param("vaultId");
-  await requireVaultAccess(c, vaultId);
+  await requireActiveDeviceVaultAccess(c, vaultId);
   const body = commitSchema.parse(await c.req.json());
 
   const blobHead = await c.env.BUCKET.head(body.blobKey);
@@ -193,7 +197,7 @@ syncRoutes.post("/:vaultId/commits", async (c) => {
 
 syncRoutes.get("/:vaultId/changes", async (c) => {
   const vaultId = c.req.param("vaultId");
-  await requireVaultAccess(c, vaultId);
+  await requireActiveDeviceVaultAccess(c, vaultId);
   const since = Number(c.req.query("since") ?? "0");
   const limit = Math.min(Number(c.req.query("limit") ?? "200"), 500);
 
@@ -222,7 +226,7 @@ syncRoutes.get("/:vaultId/changes", async (c) => {
 // vault stops being able to merge at all once it outgrows that.
 syncRoutes.get("/:vaultId/versions/:versionId", async (c) => {
   const vaultId = c.req.param("vaultId");
-  await requireVaultAccess(c, vaultId);
+  await requireActiveDeviceVaultAccess(c, vaultId);
   const versionId = c.req.param("versionId");
 
   const [row] = await c.env.DB.select({
@@ -245,7 +249,7 @@ syncRoutes.get("/:vaultId/versions/:versionId", async (c) => {
 
 syncRoutes.get("/:vaultId/objects/:blobKey", async (c) => {
   const vaultId = c.req.param("vaultId");
-  await requireVaultAccess(c, vaultId);
+  await requireActiveDeviceVaultAccess(c, vaultId);
   const blobKey = decodeURIComponent(c.req.param("blobKey"));
   if (!blobKey.startsWith(`${vaultId}/`)) throw badRequest("Blob key does not belong to this vault");
 
@@ -270,7 +274,7 @@ function preferencesObjectKey(vaultId: string): string {
 
 syncRoutes.get("/:vaultId/preferences/info", async (c) => {
   const vaultId = c.req.param("vaultId");
-  await requireVaultAccess(c, vaultId);
+  await requireActiveDeviceVaultAccess(c, vaultId);
   const [row] = await c.env.DB.select()
     .from(storageObjects)
     .where(eq(storageObjects.objectKey, preferencesObjectKey(vaultId)))
@@ -286,7 +290,7 @@ syncRoutes.get("/:vaultId/preferences/info", async (c) => {
 // stored bytes that were never actually written.
 syncRoutes.put("/:vaultId/preferences", async (c) => {
   const vaultId = c.req.param("vaultId");
-  await requireVaultAccess(c, vaultId);
+  await requireActiveDeviceVaultAccess(c, vaultId);
 
   const [vault] = await c.env.DB.select({ primaryDeviceId: vaults.primaryDeviceId, ownerId: vaults.ownerId })
     .from(vaults)
@@ -341,7 +345,7 @@ syncRoutes.put("/:vaultId/preferences", async (c) => {
 
 syncRoutes.get("/:vaultId/preferences", async (c) => {
   const vaultId = c.req.param("vaultId");
-  await requireVaultAccess(c, vaultId);
+  await requireActiveDeviceVaultAccess(c, vaultId);
   const object = await c.env.BUCKET.get(preferencesObjectKey(vaultId));
   if (!object) throw notFound("No preferences have been shared for this vault yet");
   const bytes = await object.arrayBuffer();
@@ -354,7 +358,7 @@ const ackSchema = z.object({ lastSequence: z.number().int().nonnegative() });
 
 syncRoutes.post("/:vaultId/acks", async (c) => {
   const vaultId = c.req.param("vaultId");
-  await requireVaultAccess(c, vaultId);
+  await requireActiveDeviceVaultAccess(c, vaultId);
   const body = ackSchema.parse(await c.req.json());
   const deviceId = c.var.deviceId;
 
@@ -371,7 +375,7 @@ syncRoutes.post("/:vaultId/acks", async (c) => {
 
 syncRoutes.get("/:vaultId/status", async (c) => {
   const vaultId = c.req.param("vaultId");
-  await requireVaultAccess(c, vaultId);
+  await requireActiveDeviceVaultAccess(c, vaultId);
   const deviceId = c.var.deviceId;
 
   const [latest] = await c.env.DB.select({ sequence: changeEvents.sequence })
