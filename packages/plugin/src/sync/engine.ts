@@ -70,6 +70,19 @@ export class SyncEngine {
     return (await this.deps.queue.list()).length;
   }
 
+  // Changes this device has not applied yet - the other direction from
+  // pendingUploadCount, and the one that was missing.
+  //
+  // A device that has just attached has an empty upload queue and an
+  // entire vault still to come down, so a status built only from
+  // uploads reports "all files synced" over an empty vault. That reads
+  // as "your notes are gone" rather than "nothing has arrived yet".
+  async pendingDownloadCount(): Promise<number> {
+    const { api, vaultId, state } = this.deps;
+    const [remote, applied] = await Promise.all([api.status(vaultId), state.getLastAppliedSequence()]);
+    return Math.max(0, remote.latestSequence - applied);
+  }
+
   // --- Outgoing: local vault event -> encrypted, durably queued op -------
 
   // A pure rename/move: content is unchanged, only the path differs.

@@ -35,6 +35,7 @@ export class FakeApiServer {
   private changes: ChangeRow[] = [];
   private idempotency = new Map<string, unknown>();
   private seq = 0;
+  private acked = 0;
   private nextId = 1;
 
   install(vaultId: string) {
@@ -160,7 +161,17 @@ export class FakeApiServer {
     }
 
     if (method === "POST" && path === `/v1/vaults/${vaultId}/acks`) {
+      const body = JSON.parse(String(init.body)) as { lastSequence: number };
+      this.acked = body.lastSequence;
       return this.json({ status: "acked" });
+    }
+
+    if (method === "GET" && path === `/v1/vaults/${vaultId}/status`) {
+      return this.json({
+        latestSequence: this.seq,
+        lastAckedSequence: this.acked,
+        pendingCount: Math.max(0, this.seq - this.acked),
+      });
     }
 
     return new Response(JSON.stringify({ code: "not_found", message: "no fake route" }), { status: 404 });

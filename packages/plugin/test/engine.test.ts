@@ -669,6 +669,38 @@ describe("SyncEngine", () => {
     expect(new Uint8Array(await vault.read("legacy.png"))).toEqual(content);
   });
 
+  it("reports work still to come down on a device that has not pulled yet", async () => {
+    const vaultKey = generateVaultKey();
+    const makeDeviceEngine = () => {
+      const api = new SynoraApiClient("http://fake");
+      const store = new InMemoryKeyValueStore();
+      return new SyncEngine({
+        api,
+        vaultId: VAULT_ID,
+        vaultKey,
+        vault: new MemoryVault(),
+        queue: new SyncQueue(store, new InMemoryBlobStore()),
+        state: new LocalStateStore(store),
+        suppressor: new WriteSuppressor(),
+      });
+    };
+
+    const a = makeDeviceEngine();
+    await a.handleLocalChange("one.md", "created", new TextEncoder().encode("1"));
+    await a.handleLocalChange("two.md", "created", new TextEncoder().encode("2"));
+    await a.flush();
+
+    // Freshly attached: nothing queued to upload, a whole vault still
+    // to come down. Reporting only the upload queue here is what made
+    // the settings panel say "all files synced" over an empty vault.
+    const b = makeDeviceEngine();
+    expect(await b.pendingUploadCount()).toBe(0);
+    expect(await b.pendingDownloadCount()).toBe(2);
+
+    await b.pull();
+    expect(await b.pendingDownloadCount()).toBe(0);
+  });
+
   it("never sends an empty-string fileId for a second edit to a not-yet-synced file", async () => {
     const { engine, queue } = buildEngine();
 

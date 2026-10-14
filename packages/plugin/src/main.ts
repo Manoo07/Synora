@@ -627,6 +627,10 @@ export default class SynoraPlugin extends Plugin {
     return (await this.engine?.pendingUploadCount()) ?? 0;
   }
 
+  async getPendingDownloadCount(): Promise<number> {
+    return (await this.engine?.pendingDownloadCount()) ?? 0;
+  }
+
   // One file that pull() couldn't apply (e.g. a filename with characters
   // illegal on this device's filesystem - confirmed live) used to abort
   // every change behind it in the feed, silently, forever. pull() now

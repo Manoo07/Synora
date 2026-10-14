@@ -412,9 +412,19 @@ export class SynoraSettingTab extends PluginSettingTab {
   // directly, rather than reading a shared instance field - see
   // renderGeneration above for why.
   private async renderSyncStatus(target: HTMLElement, generation: number): Promise<void> {
-    const pending = await this.plugin.getPendingUploadCount();
+    const [pending, incoming] = await Promise.all([
+      this.plugin.getPendingUploadCount(),
+      // Reported separately rather than folded into one number: "5 to
+      // upload" and "5 to download" mean very different things to
+      // someone wondering where their notes are.
+      this.plugin.getPendingDownloadCount().catch(() => 0),
+    ]);
     if (generation !== this.renderGeneration) return;
-    let text = pending > 0 ? `⟳ ${pending} file${pending === 1 ? "" : "s"} waiting to upload` : "✓ All files synced";
+
+    const parts: string[] = [];
+    if (pending > 0) parts.push(`${pending} file${pending === 1 ? "" : "s"} to upload`);
+    if (incoming > 0) parts.push(`${incoming} change${incoming === 1 ? "" : "s"} to download`);
+    let text = parts.length > 0 ? `⟳ ${parts.join(" · ")}` : "✓ All files synced";
 
     try {
       const usage = await this.plugin.api.getUsage();
