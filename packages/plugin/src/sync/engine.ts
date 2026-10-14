@@ -220,19 +220,18 @@ export class SyncEngine {
       return;
     }
 
-    const changes = await api.getChanges(vaultId, 0, 500);
-    const remoteChange = changes.changes.find((c) => c.versionId === remoteVersionId);
-    if (!remoteChange?.blobKey) {
+    const remoteVersion = await this.lookupVersion(remoteVersionId);
+    if (!remoteVersion?.blobKey) {
       await this.fileAsConflictCopy(op);
       return;
     }
 
     const remoteManifest = decodeManifest(
-      decryptEnvelope(vaultKey, decodeEnvelope(await api.getObject(vaultId, remoteChange.blobKey))),
+      decryptEnvelope(vaultKey, decodeEnvelope(await api.getObject(vaultId, remoteVersion.blobKey))),
     );
     const localManifest = decodeManifest(decryptEnvelope(vaultKey, decodeEnvelope(fromBase64(op.envelopeBase64))));
 
-    const merged = await this.tryTextMerge(op, changes.changes, remoteManifest.content, localManifest.content);
+    const merged = await this.tryTextMerge(op, remoteManifest.content, localManifest.content);
     if (merged) {
       const hash = toHex(sha256(merged));
       suppressor.markApplied(op.logicalPath, hash);
@@ -266,23 +265,33 @@ export class SyncEngine {
     await this.fileAsConflictCopy(op);
   }
 
+  // A version that's genuinely gone just means we can't merge against
+  // it and fall back to preserving both sides, so that's not an error.
+  private async lookupVersion(versionId: string) {
+    try {
+      return await this.deps.api.getVersion(this.deps.vaultId, versionId);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) return undefined;
+      throw err;
+    }
+  }
+
   // Attempts a three-way text merge. Returns the merged bytes on a clean
   // (non-conflicting) merge, or undefined if a merge isn't possible or
   // isn't safe - the caller then falls back to preserving both versions.
   private async tryTextMerge(
     op: PendingOp,
-    changes: Array<{ versionId: string | null; blobKey: string | null }>,
     remoteContent: Uint8Array,
     localContent: Uint8Array,
   ): Promise<Uint8Array | undefined> {
     if (!isTextPath(op.logicalPath) || !op.baseVersionId) return undefined;
     const { api, vaultId, vaultKey } = this.deps;
 
-    const baseChange = changes.find((c) => c.versionId === op.baseVersionId);
-    if (!baseChange?.blobKey) return undefined;
+    const baseVersion = await this.lookupVersion(op.baseVersionId);
+    if (!baseVersion?.blobKey) return undefined;
 
     const baseManifest = decodeManifest(
-      decryptEnvelope(vaultKey, decodeEnvelope(await api.getObject(vaultId, baseChange.blobKey))),
+      decryptEnvelope(vaultKey, decodeEnvelope(await api.getObject(vaultId, baseVersion.blobKey))),
     );
 
     const decoder = new TextDecoder();

@@ -215,6 +215,32 @@ syncRoutes.get("/:vaultId/changes", async (c) => {
   return c.json({ changes: rows, hasMore: rows.length === limit });
 });
 
+// Resolves one specific version to its blob. Conflict resolution needs
+// the remote version and the local edit's base version to attempt a
+// three-way merge, and both are addressed by id - scanning /changes for
+// them only works while the whole history still fits in one page, so a
+// vault stops being able to merge at all once it outgrows that.
+syncRoutes.get("/:vaultId/versions/:versionId", async (c) => {
+  const vaultId = c.req.param("vaultId");
+  await requireVaultAccess(c, vaultId);
+  const versionId = c.req.param("versionId");
+
+  const [row] = await c.env.DB.select({
+    versionId: fileVersions.id,
+    fileId: fileVersions.fileId,
+    blobKey: fileVersions.blobKey,
+    ciphertextHash: fileVersions.ciphertextHash,
+    sizeBytes: fileVersions.sizeBytes,
+  })
+    .from(fileVersions)
+    .innerJoin(files, eq(files.id, fileVersions.fileId))
+    .where(and(eq(fileVersions.id, versionId), eq(files.vaultId, vaultId)))
+    .limit(1);
+
+  if (!row) throw notFound("Version not found");
+  return c.json(row);
+});
+
 // --- Object download -------------------------------------------------------
 
 syncRoutes.get("/:vaultId/objects/:blobKey", async (c) => {

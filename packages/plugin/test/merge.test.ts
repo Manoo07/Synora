@@ -80,6 +80,24 @@ describe("mergeText", () => {
     }
   });
 
+  it("never drops a deletion the diff re-attributed to a look-alike position", () => {
+    // Remote deletes lines 2-4, but because "a-A" and "a-C" each repeat,
+    // the diff is free to describe that as deleting line 3 plus lines
+    // 5-6 - which looks exactly like local's edit without being it. The
+    // block ["a-A","a-C"] is unique here, so only checking the range as
+    // a whole misses this; the individual lines in it are what repeat.
+    const base = "a-A\nsame\na-A\nsame\na-C\na-A\na-C";
+    const local = "a-A\nsame\na-A\nsame\na-C"; // dropped the last two
+    const remote = "a-A\nsame\na-A\na-C"; // dropped the middle three
+
+    const result = mergeText(base, local, remote);
+    if (!result.hasConflict) {
+      // Five distinct lines were deleted between the two sides, so
+      // anything longer than this means a deletion went missing.
+      expect(result.lines.length).toBe(2);
+    }
+  });
+
   it("still collapses a genuine identical edit on a uniquely identifiable line", () => {
     // Guard against the fix above over-triggering: when the edited range
     // is unique in the file there is no ambiguity, so two sides making

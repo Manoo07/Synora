@@ -203,6 +203,16 @@ export class SynoraApiClient {
     );
   }
 
+  getVersion(vaultId: string, versionId: string) {
+    return this.request<{
+      versionId: string;
+      fileId: string;
+      blobKey: string | null;
+      ciphertextHash: string | null;
+      sizeBytes: number | null;
+    }>(`/v1/vaults/${vaultId}/versions/${encodeURIComponent(versionId)}`);
+  }
+
   async getObject(vaultId: string, blobKey: string): Promise<Uint8Array> {
     const headers: Record<string, string> = {};
     if (this.accessToken) headers.authorization = `Bearer ${this.accessToken}`;

@@ -65,15 +65,24 @@ function arraysEqual(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((v, i) => v === b[i]);
 }
 
-// True when the base lines in [start, end) also occur, identically, at
-// some other position in base - i.e. that range is NOT uniquely
-// identifiable by its content alone.
-function appearsElsewhere(baseLines: string[], start: number, end: number): boolean {
-  const needle = baseLines.slice(start, end);
-  if (needle.length === 0) return false;
-  for (let i = 0; i <= baseLines.length - needle.length; i++) {
-    if (i === start) continue;
-    if (arraysEqual(baseLines.slice(i, i + needle.length), needle)) return true;
+// True when the base range [start, end) can't be pinned down by its
+// content alone, because some line in it (or, for an insertion point,
+// immediately beside it) also occurs elsewhere in the file.
+//
+// Checked line by line rather than as a whole block on purpose: a diff
+// is free to re-express one edit as a different, equivalent set of
+// hunks whenever repeated lines let it, so a block that looks unique
+// can still have been assembled out of lines the alignment could have
+// taken from anywhere.
+function rangeIsAmbiguous(baseLines: string[], start: number, end: number): boolean {
+  const occurrences = new Map<string, number>();
+  for (const line of baseLines) occurrences.set(line, (occurrences.get(line) ?? 0) + 1);
+  // A pure insertion point replaces nothing, so what anchors it is the
+  // line on either side of it instead.
+  const from = start === end ? Math.max(0, start - 1) : start;
+  const to = start === end ? Math.min(baseLines.length, start + 1) : end;
+  for (let i = from; i < to; i++) {
+    if ((occurrences.get(baseLines[i]!) ?? 0) > 1) return true;
   }
   return false;
 }
@@ -162,18 +171,19 @@ export function mergeLines(baseLines: string[], localLines: string[], remoteLine
         localOnes[0]!.baseStart === remoteOnes[0]!.baseStart &&
         localOnes[0]!.baseEnd === remoteOnes[0]!.baseEnd &&
         arraysEqual(localFlat, remoteFlat) &&
-        // ...and the base range both sides supposedly edited is unique
-        // in the file. The two computeHunks calls are independent, so
-        // over repeated identical lines they can each pick a DIFFERENT
-        // physical instance and still report hunks that look identical
-        // here. Collapsing those to a single edit silently drops one
-        // side's change: base ["x","a","a","a","a"] where local removes
-        // one "a" and remote removes a different "a" must end up with
-        // two removed, but without this guard only one is applied. The
-        // dropped edit then re-diverges on the next sync and the devices
-        // keep re-resolving the same conflict forever - confirmed live
-        // as a real bug (a user had to disable the plugin).
-        !appearsElsewhere(baseLines, localOnes[0]!.baseStart, localOnes[0]!.baseEnd);
+        // ...and the base range both sides supposedly edited is one
+        // that can actually be pinned down. The two computeHunks calls
+        // are independent, so wherever repeated lines make the
+        // alignment ambiguous they can describe two DIFFERENT edits
+        // with hunks that look identical here. Collapsing those to a
+        // single edit silently drops one side's change: base
+        // ["x","a","a","a","a"] where local removes one "a" and remote
+        // removes a different "a" must end up with two removed, but
+        // without this guard only one is applied. The dropped edit then
+        // re-diverges on the next sync and the devices keep
+        // re-resolving the same conflict forever - confirmed live as a
+        // real bug (a user had to disable the plugin).
+        !rangeIsAmbiguous(baseLines, localOnes[0]!.baseStart, localOnes[0]!.baseEnd);
       if (sameSingleEdit) {
         out.push(...localFlat);
       } else {

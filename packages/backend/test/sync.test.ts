@@ -169,6 +169,67 @@ describe("sync protocol", () => {
     expect(await res.text()).toBe("hello vault");
   });
 
+  it("looks a version up by id, regardless of how long the vault's history is", async () => {
+    const bindings = testBindings();
+    const alice = await registerUser(bindings, "alice@example.com");
+    const vault = await createVault(bindings, alice.accessToken);
+
+    const upload = await requestUpload(bindings, alice.accessToken, vault.id);
+    const blob = await putBlob(bindings, alice.accessToken, upload.uploadUrl, "version one");
+    const create = await commit(bindings, alice.accessToken, vault.id, {
+      blobKey: blob.blobKey,
+      ciphertextHash: blob.ciphertextHash,
+      sizeBytes: blob.sizeBytes,
+      operation: "created",
+      idempotencyKey: "op-1",
+    });
+    const versionId = create.body.versionId as string;
+
+    const found = await app.request(
+      `/v1/vaults/${vault.id}/versions/${versionId}`,
+      { headers: { authorization: `Bearer ${alice.accessToken}` } },
+      bindings,
+    );
+    expect(found.status).toBe(200);
+    expect(await found.json()).toMatchObject({ versionId, blobKey: blob.blobKey });
+
+    const missing = await app.request(
+      `/v1/vaults/${vault.id}/versions/00000000-0000-4000-8000-000000000000`,
+      { headers: { authorization: `Bearer ${alice.accessToken}` } },
+      bindings,
+    );
+    expect(missing.status).toBe(404);
+  });
+
+  it("will not resolve a version id belonging to someone else's vault", async () => {
+    const bindings = testBindings();
+    const alice = await registerUser(bindings, "alice@example.com");
+    const bob = await registerUser(bindings, "bob@example.com");
+    const aliceVault = await createVault(bindings, alice.accessToken);
+    const bobVault = await createVault(bindings, bob.accessToken);
+
+    const upload = await requestUpload(bindings, alice.accessToken, aliceVault.id);
+    const blob = await putBlob(bindings, alice.accessToken, upload.uploadUrl, "alice's secret");
+    const create = await commit(bindings, alice.accessToken, aliceVault.id, {
+      blobKey: blob.blobKey,
+      ciphertextHash: blob.ciphertextHash,
+      sizeBytes: blob.sizeBytes,
+      operation: "created",
+      idempotencyKey: "op-1",
+    });
+    const versionId = create.body.versionId as string;
+
+    // Bob is a legitimate user asking his own vault for a version id
+    // that is not in it - the vault scope on the lookup is what stops
+    // this from handing back a blob key from Alice's vault.
+    const res = await app.request(
+      `/v1/vaults/${bobVault.id}/versions/${versionId}`,
+      { headers: { authorization: `Bearer ${bob.accessToken}` } },
+      bindings,
+    );
+    expect(res.status).toBe(404);
+  });
+
   it("tracks ack cursors and pending count via status", async () => {
     const bindings = testBindings();
     const alice = await registerUser(bindings, "alice@example.com");

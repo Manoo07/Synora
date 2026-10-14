@@ -318,6 +318,59 @@ describe("SyncEngine", () => {
     expect(changes.changes).toHaveLength(2);
   });
 
+  it("still merges on a vault whose history has outgrown a single changes page", async () => {
+    const vaultKey = generateVaultKey();
+    const makeDeviceEngine = () => {
+      const api = new SynoraApiClient("http://fake");
+      const vault = new MemoryVault();
+      const store = new InMemoryKeyValueStore();
+      return {
+        engine: new SyncEngine({
+          api,
+          vaultId: VAULT_ID,
+          vaultKey,
+          vault,
+          queue: new SyncQueue(store),
+          state: new LocalStateStore(store),
+          suppressor: new WriteSuppressor(),
+        }),
+        vault,
+        api,
+      };
+    };
+
+    const a = makeDeviceEngine();
+
+    // Push the vault's history past the 500-change page cap that
+    // conflict resolution used to scan from sequence 0. Every save is a
+    // change event, so a real vault crosses this in days - and once it
+    // did, neither the remote version nor the merge base could be found
+    // any more and every concurrent edit forked a conflict copy instead
+    // of merging.
+    for (let i = 0; i < 520; i++) {
+      await a.engine.handleLocalChange(`filler-${i}.md`, "created", new TextEncoder().encode(`filler ${i}`));
+      await a.engine.flush();
+    }
+
+    const b = makeDeviceEngine();
+    const base = "# Title\n\nFirst paragraph.\n\nSecond paragraph.";
+    await a.engine.handleLocalChange("note.md", "created", new TextEncoder().encode(base));
+    await a.engine.flush();
+    await b.engine.pull();
+
+    const localA = "# Title\n\nFirst paragraph EDITED BY A.\n\nSecond paragraph.";
+    await a.engine.handleLocalChange("note.md", "updated", new TextEncoder().encode(localA));
+    await a.engine.flush();
+
+    const localB = "# Title\n\nFirst paragraph.\n\nSecond paragraph EDITED BY B.";
+    await b.engine.handleLocalChange("note.md", "updated", new TextEncoder().encode(localB));
+    await b.engine.flush();
+
+    const merged = new TextDecoder().decode(await b.vault.read("note.md"));
+    expect(merged).toBe("# Title\n\nFirst paragraph EDITED BY A.\n\nSecond paragraph EDITED BY B.");
+    expect([...b.vault.files.keys()].some((p) => p.includes("conflict"))).toBe(false);
+  });
+
   it("never sends an empty-string fileId for a second edit to a not-yet-synced file", async () => {
     const { engine, queue } = buildEngine();
 

@@ -121,8 +121,20 @@ export class FakeApiServer {
 
     if (method === "GET" && path === `/v1/vaults/${vaultId}/changes`) {
       const since = Number(url.searchParams.get("since") ?? "0");
-      const changes = this.changes.filter((c) => c.sequence > since);
-      return this.json({ changes, hasMore: false });
+      // Mirrors the real route, which pages oldest-first and caps the
+      // page at 500 - without that cap here a caller that only works
+      // while the whole history fits in one page looks fine in tests.
+      const limit = Math.min(Number(url.searchParams.get("limit") ?? "200"), 500);
+      const matching = this.changes.filter((c) => c.sequence > since);
+      const changes = matching.slice(0, limit);
+      return this.json({ changes, hasMore: matching.length > changes.length });
+    }
+
+    if (method === "GET" && path.startsWith(`/v1/vaults/${vaultId}/versions/`)) {
+      const versionId = decodeURIComponent(path.slice(`/v1/vaults/${vaultId}/versions/`.length));
+      const version = this.versions.get(versionId);
+      if (!version) return new Response(JSON.stringify({ code: "not_found", message: "no version" }), { status: 404 });
+      return this.json({ versionId, ...version });
     }
 
     if (method === "GET" && path.startsWith(`/v1/vaults/${vaultId}/objects/`)) {
