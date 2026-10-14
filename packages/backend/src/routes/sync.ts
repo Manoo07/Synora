@@ -235,6 +235,10 @@ syncRoutes.get("/:vaultId/versions/:versionId", async (c) => {
     blobKey: fileVersions.blobKey,
     ciphertextHash: fileVersions.ciphertextHash,
     sizeBytes: fileVersions.sizeBytes,
+    // Whether the file is currently tombstoned. A client whose edit
+    // lost a race against a delete needs to tell that apart from losing
+    // to an ordinary edit, because the two resolve differently.
+    deletedAt: files.deletedAt,
   })
     .from(fileVersions)
     .innerJoin(files, eq(files.id, fileVersions.fileId))

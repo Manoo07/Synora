@@ -7,11 +7,16 @@
 // in isolation, without spinning up that whole stack from this package.
 interface StoredFile {
   currentVersionId: string | null;
+  // Mirrors the real files.deleted_at: set by a delete commit, cleared
+  // by any other. The version lookup reports it, and the engine needs
+  // it to tell a delete apart from an ordinary edit it lost to.
+  deletedAt: string | null;
 }
 interface StoredVersion {
   blobKey: string;
   ciphertextHash: string;
   sizeBytes: number;
+  parentVersionIds: string[];
 }
 interface ChangeRow {
   sequence: number;
@@ -70,6 +75,7 @@ export class FakeApiServer {
         sizeBytes: number;
         operation: string;
         idempotencyKey: string;
+        parentVersionIds?: string[];
       };
 
       if (this.idempotency.has(body.idempotencyKey)) {
@@ -97,12 +103,20 @@ export class FakeApiServer {
         }
       } else {
         fileId = `file-${this.nextId++}`;
-        this.files.set(fileId, { currentVersionId: null });
+        this.files.set(fileId, { currentVersionId: null, deletedAt: null });
       }
 
       const versionId = `version-${this.nextId++}`;
-      this.versions.set(versionId, { blobKey: body.blobKey, ciphertextHash: body.ciphertextHash, sizeBytes: body.sizeBytes });
-      this.files.set(fileId, { currentVersionId: versionId });
+      this.versions.set(versionId, {
+        blobKey: body.blobKey,
+        ciphertextHash: body.ciphertextHash,
+        sizeBytes: body.sizeBytes,
+        parentVersionIds: body.parentVersionIds ?? [],
+      });
+      this.files.set(fileId, {
+        currentVersionId: versionId,
+        deletedAt: body.operation === "deleted" ? new Date().toISOString() : null,
+      });
       const sequence = ++this.seq;
       this.changes.push({
         sequence,
@@ -134,7 +148,8 @@ export class FakeApiServer {
       const versionId = decodeURIComponent(path.slice(`/v1/vaults/${vaultId}/versions/`.length));
       const version = this.versions.get(versionId);
       if (!version) return new Response(JSON.stringify({ code: "not_found", message: "no version" }), { status: 404 });
-      return this.json({ versionId, ...version });
+      const owner = [...this.files.entries()].find(([, file]) => file.currentVersionId === versionId);
+      return this.json({ versionId, ...version, deletedAt: owner?.[1].deletedAt ?? null });
     }
 
     if (method === "GET" && path.startsWith(`/v1/vaults/${vaultId}/objects/`)) {

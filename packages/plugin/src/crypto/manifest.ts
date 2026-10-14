@@ -11,6 +11,16 @@ export interface FileManifest {
 
 const MANIFEST_FORMAT_VERSION = 1;
 
+// Distinguishable from a corruption failure: this one means the data is
+// fine and this build is behind, so the person needs to update rather
+// than worry that something is damaged.
+export class UnsupportedFormatError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "UnsupportedFormatError";
+  }
+}
+
 function writeString(parts: Uint8Array[], value: string) {
   const bytes = new TextEncoder().encode(value);
   const header = new Uint8Array(4);
@@ -47,6 +57,16 @@ export function encodeManifest(manifest: Omit<FileManifest, "formatVersion">): U
 
 export function decodeManifest(bytes: Uint8Array): FileManifest {
   const formatVersion = bytes[0]!;
+  // Refuse rather than guess. A newer plugin may have written fields
+  // this build does not know how to read, and decoding it anyway would
+  // produce a plausible-looking note with content quietly missing or
+  // misplaced - then write that back as the current version, destroying
+  // the real one. Stopping is recoverable; a bad decode is not.
+  if (formatVersion !== MANIFEST_FORMAT_VERSION) {
+    throw new UnsupportedFormatError(
+      `This note was written by a newer version of Synora (format ${formatVersion}). Update the plugin to read it.`,
+    );
+  }
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const offset = { pos: 1 };
   const fileId = readString(view, bytes, offset);

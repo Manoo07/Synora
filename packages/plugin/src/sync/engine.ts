@@ -22,6 +22,18 @@ function isTextPath(path: string): boolean {
   return TEXT_EXTENSIONS.some((ext) => path.toLowerCase().endsWith(ext));
 }
 
+// Notes and attachments get separate encryption contexts, which feed
+// into both the derived key and the envelope's authenticated data. The
+// point is domain separation: a nonce-reuse or key-derivation bug in
+// one kind of content cannot be combined with ciphertext of the other.
+//
+// Safe to change for new writes only - every envelope stores the
+// context it was sealed with and decrypts under that, so blobs written
+// before this keep working untouched.
+function contextFor(path: string): "file-content" | "attachment" {
+  return isTextPath(path) ? "file-content" : "attachment";
+}
+
 function conflictPath(path: string): string {
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
   const dot = path.lastIndexOf(".");
@@ -100,7 +112,7 @@ export class SyncEngine {
     if (existing && existing.contentHash === contentHash && operation === "updated") return;
 
     const manifestBytes = encodeManifest({ fileId: fileId ?? "", logicalPath: path, content: bytes });
-    const envelope = encryptEnvelope(vaultKey, vaultId, fileId ?? path, "file-content", manifestBytes);
+    const envelope = encryptEnvelope(vaultKey, vaultId, fileId ?? path, contextFor(path), manifestBytes);
     const encoded = encodeEnvelope(envelope);
     const ciphertextHash = toHex(sha256(encoded));
 
@@ -179,6 +191,7 @@ export class SyncEngine {
         const result = await api.commit(vaultId, {
           fileId: op.fileId,
           baseVersionId: op.baseVersionId,
+          parentVersionIds: op.parentVersionIds,
           blobKey: upload.uploadId,
           ciphertextHash: op.ciphertextHash,
           sizeBytes: op.sizeBytes,
@@ -241,10 +254,33 @@ export class SyncEngine {
       return;
     }
 
+    const localManifest = decodeManifest(decryptEnvelope(vaultKey, decodeEnvelope(localPayload)));
+
+    // Our edit raced a delete made somewhere else.
+    //
+    // A delete can be redone in a second; writing that someone did not
+    // get to sync cannot be recovered once it is gone. So the edit
+    // wins: the file comes back carrying our content, committed on top
+    // of the tombstone, and that resurrection propagates to the device
+    // that deleted it. Merging here instead would be worse than it
+    // sounds - the tombstone's payload is empty, so the "merge" is our
+    // text against nothing, which ends up writing an empty file over
+    // the note and shunting the real content into a conflict copy.
+    if (remoteVersion.deletedAt) {
+      if (op.operation === "deleted") {
+        // Both sides deleted it. Nothing to reconcile and nothing to
+        // keep - just stop trying to re-send ours.
+        await queue.remove(op.idempotencyKey);
+        await state.remove(op.logicalPath);
+        return;
+      }
+      await this.resurrectOverDelete(op, localManifest.content, remoteFileId, remoteVersionId);
+      return;
+    }
+
     const remoteManifest = decodeManifest(
       decryptEnvelope(vaultKey, decodeEnvelope(await api.getObject(vaultId, remoteVersion.blobKey))),
     );
-    const localManifest = decodeManifest(decryptEnvelope(vaultKey, decodeEnvelope(localPayload)));
 
     const merged = await this.tryTextMerge(op, remoteManifest.content, localManifest.content);
     if (merged) {
@@ -253,13 +289,17 @@ export class SyncEngine {
       await vault.write(op.logicalPath, merged);
 
       const manifestBytes = encodeManifest({ fileId: remoteFileId, logicalPath: op.logicalPath, content: merged });
-      const envelope = encodeEnvelope(encryptEnvelope(vaultKey, vaultId, remoteFileId, "file-content", manifestBytes));
+      const envelope = encodeEnvelope(encryptEnvelope(vaultKey, vaultId, remoteFileId, contextFor(op.logicalPath), manifestBytes));
       await queue.remove(op.idempotencyKey);
       await queue.enqueue({
         idempotencyKey: crypto.randomUUID(),
         logicalPath: op.logicalPath,
         fileId: remoteFileId,
         baseVersionId: remoteVersionId,
+        // Both sides this merge joins. tryTextMerge only returns
+        // content when op.baseVersionId exists, so the local parent is
+        // always known here.
+        parentVersionIds: [remoteVersionId, op.baseVersionId!],
         operation: "updated",
         ciphertextHash: toHex(sha256(envelope)),
         sizeBytes: envelope.byteLength,
@@ -314,6 +354,47 @@ export class SyncEngine {
     return new TextEncoder().encode(result.lines.join("\n"));
   }
 
+  // Re-commits our content on top of the tombstone so the file comes
+  // back. The queued op's own envelope cannot be reused: its manifest
+  // was sealed with whatever fileId this device knew at the time, and
+  // the fileId is part of the envelope's authenticated data, so it has
+  // to be re-encrypted against the one the server kept.
+  private async resurrectOverDelete(
+    op: PendingOp,
+    content: Uint8Array,
+    remoteFileId: string,
+    tombstoneVersionId: string,
+  ): Promise<void> {
+    const { vaultId, vaultKey, queue, state, vault, suppressor } = this.deps;
+
+    const hash = toHex(sha256(content));
+    suppressor.markApplied(op.logicalPath, hash);
+    await vault.write(op.logicalPath, content);
+
+    const manifestBytes = encodeManifest({ fileId: remoteFileId, logicalPath: op.logicalPath, content });
+    const envelope = encodeEnvelope(encryptEnvelope(vaultKey, vaultId, remoteFileId, contextFor(op.logicalPath), manifestBytes));
+    await queue.remove(op.idempotencyKey);
+    await queue.enqueue(
+      {
+        idempotencyKey: crypto.randomUUID(),
+        logicalPath: op.logicalPath,
+        fileId: remoteFileId,
+        baseVersionId: tombstoneVersionId,
+        operation: "updated",
+        ciphertextHash: toHex(sha256(envelope)),
+        sizeBytes: envelope.byteLength,
+        enqueuedAt: Date.now(),
+      },
+      envelope,
+    );
+    await state.upsert({
+      fileId: remoteFileId,
+      logicalPath: op.logicalPath,
+      currentVersionId: tombstoneVersionId,
+      contentHash: hash,
+    });
+  }
+
   private async fileAsConflictCopy(op: PendingOp, localPayload: Uint8Array): Promise<void> {
     const { vaultKey, queue, state, vault, suppressor } = this.deps;
     // File our edit as a sibling conflict copy instead of retrying against
@@ -329,7 +410,7 @@ export class SyncEngine {
     await vault.write(copyPath, ownContent);
 
     const copyManifest = encodeManifest({ fileId: "", logicalPath: copyPath, content: ownContent });
-    const copyEnvelope = encodeEnvelope(encryptEnvelope(vaultKey, this.deps.vaultId, copyPath, "file-content", copyManifest));
+    const copyEnvelope = encodeEnvelope(encryptEnvelope(vaultKey, this.deps.vaultId, copyPath, contextFor(copyPath), copyManifest));
     await queue.remove(op.idempotencyKey);
     await queue.enqueue({
       idempotencyKey: crypto.randomUUID(),
@@ -374,6 +455,22 @@ export class SyncEngine {
             }
           } else if (change.blobKey) {
             const envelopeBytes = await api.getObject(vaultId, change.blobKey);
+            // Checked against the hash the change feed declared, before
+            // anything is decrypted or written.
+            //
+            // The AEAD tag already catches a blob that was altered, and
+            // the envelope's AAD catches one replayed into a different
+            // file's slot - but neither catches an *earlier version of
+            // this same file* being served in place of the current one.
+            // That blob is authentic and bound to the right slot; only
+            // its hash differs from the one the feed named. Silently
+            // rolling a note back to an older copy is exactly the kind
+            // of loss this system exists to prevent.
+            if (change.ciphertextHash && toHex(sha256(envelopeBytes)) !== change.ciphertextHash) {
+              throw new Error(
+                `Downloaded content for ${change.fileId} does not match the hash the server declared - refusing to apply it`,
+              );
+            }
             const manifest = decodeManifest(decryptEnvelope(vaultKey, decodeEnvelope(envelopeBytes)));
             const hash = toHex(sha256(manifest.content));
 

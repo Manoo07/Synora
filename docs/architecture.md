@@ -227,10 +227,23 @@ they were originally exempt from suppression entirely, which cost real money
 | Situation | Behaviour |
 |---|---|
 | One side changed | Apply it |
-| Both changed, non-overlapping, text | Three-way merge |
+| Both changed, non-overlapping, text | Three-way merge, committed naming both parents |
 | Both changed, overlapping | Keep both — conflict copy |
 | Any binary file | Keep both — conflict copy |
+| **Delete vs. unsynced edit** | **The edit wins — the file is restored** |
+| Both sides deleted | Accept it; nothing to reconcile |
 | Merge logic unsure for any reason | Keep both — conflict copy |
+
+Delete-versus-edit deserves its own note, because the obvious
+implementation is wrong in a way that looks right. A tombstone commit
+carries an *empty* payload, so feeding it to the three-way merge means
+merging real text against nothing: the result is an empty file written
+over the note, with the actual writing shunted into a conflict copy.
+Instead the delete is treated as losing outright — the edit is
+re-committed on top of the tombstone and the file comes back, which
+then propagates to the device that deleted it. The asymmetry is
+deliberate: re-deleting a file takes a second, while writing that never
+got synced is gone for good.
 
 Only `.md`, `.markdown`, `.txt` are ever merged. The fallback is always
 "preserve both versions as separate files". **A spurious conflict copy is a

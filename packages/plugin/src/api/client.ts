@@ -210,6 +210,7 @@ export class SynoraApiClient {
       blobKey: string | null;
       ciphertextHash: string | null;
       sizeBytes: number | null;
+      deletedAt: string | null;
     }>(`/v1/vaults/${vaultId}/versions/${encodeURIComponent(versionId)}`);
   }
 

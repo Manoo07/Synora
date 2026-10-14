@@ -6,6 +6,12 @@ import { LocalStateStore } from "../src/sync/local-state.js";
 import { WriteSuppressor, DELETION_MARK } from "../src/sync/suppressor.js";
 import { InMemoryKeyValueStore, InMemoryBlobStore } from "../src/sync/storage.js";
 import { generateVaultKey } from "../src/crypto/keys.js";
+import { encryptEnvelope, encodeEnvelope, decodeEnvelope } from "../src/crypto/envelope.js";
+import { encodeManifest } from "../src/crypto/manifest.js";
+import { sha256 } from "@noble/hashes/sha256";
+
+const toHexDigest = (bytes: Uint8Array) =>
+  Array.from(sha256(bytes)).map((b) => b.toString(16).padStart(2, "0")).join("");
 import { MemoryVault } from "./fakes/memory-vault.js";
 import { FakeApiServer } from "./fakes/fake-server.js";
 
@@ -245,6 +251,12 @@ describe("SyncEngine", () => {
     await b.engine.flush();
     const changes = await b.api.getChanges(VAULT_ID, 0, 500);
     expect(changes.changes.at(-1)?.operation).toBe("updated");
+
+    // And it records both versions it reconciled (FR-14). Without this
+    // the history shows a merge as an ordinary edit, losing any trace
+    // of where two lines of work actually rejoined.
+    const mergeVersion = await b.api.getVersion(VAULT_ID, changes.changes.at(-1)!.versionId!);
+    expect((mergeVersion as unknown as { parentVersionIds: string[] }).parentVersionIds).toHaveLength(2);
   });
 
   it("syncs a rename without duplicating the file at its old path on another device", async () => {
@@ -457,6 +469,204 @@ describe("SyncEngine", () => {
     } finally {
       globalThis.fetch = realFetch;
     }
+  });
+
+  it("restores an edited note when it loses a race against a delete (SR-7)", async () => {
+    const vaultKey = generateVaultKey();
+    const makeDeviceEngine = () => {
+      const api = new SynoraApiClient("http://fake");
+      const vault = new MemoryVault();
+      const store = new InMemoryKeyValueStore();
+      return {
+        engine: new SyncEngine({
+          api,
+          vaultId: VAULT_ID,
+          vaultKey,
+          vault,
+          queue: new SyncQueue(store, new InMemoryBlobStore()),
+          state: new LocalStateStore(store),
+          suppressor: new WriteSuppressor(),
+        }),
+        vault,
+        api,
+      };
+    };
+
+    const a = makeDeviceEngine();
+    const b = makeDeviceEngine();
+
+    await a.engine.handleLocalChange("note.md", "created", new TextEncoder().encode("original"));
+    await a.engine.flush();
+    await b.engine.pull();
+
+    // A deletes it. B, which never saw that, has edited it meanwhile.
+    await a.engine.handleLocalChange("note.md", "deleted");
+    await a.engine.flush();
+
+    await b.engine.handleLocalChange("note.md", "updated", new TextEncoder().encode("edited while offline"));
+    await b.engine.flush();
+
+    // The writing survives at its real path - not emptied out, and not
+    // shunted into a conflict copy, which is what a merge against the
+    // tombstone's empty payload used to produce.
+    expect(new TextDecoder().decode(await b.vault.read("note.md"))).toBe("edited while offline");
+    expect([...b.vault.files.keys()].some((p) => p.includes("conflict"))).toBe(false);
+
+    // And the resurrection reaches the device that deleted it.
+    await b.engine.flush();
+    await a.engine.pull();
+    expect(new TextDecoder().decode(await a.vault.read("note.md"))).toBe("edited while offline");
+  });
+
+  it("drops its own delete when the other side already deleted the same file", async () => {
+    const vaultKey = generateVaultKey();
+    const makeDeviceEngine = () => {
+      const api = new SynoraApiClient("http://fake");
+      const vault = new MemoryVault();
+      const store = new InMemoryKeyValueStore();
+      const queue = new SyncQueue(store, new InMemoryBlobStore());
+      return {
+        engine: new SyncEngine({
+          api,
+          vaultId: VAULT_ID,
+          vaultKey,
+          vault,
+          queue,
+          state: new LocalStateStore(store),
+          suppressor: new WriteSuppressor(),
+        }),
+        queue,
+        vault,
+      };
+    };
+
+    const a = makeDeviceEngine();
+    const b = makeDeviceEngine();
+
+    await a.engine.handleLocalChange("note.md", "created", new TextEncoder().encode("doomed"));
+    await a.engine.flush();
+    await b.engine.pull();
+
+    await a.engine.handleLocalChange("note.md", "deleted");
+    await a.engine.flush();
+    await b.engine.handleLocalChange("note.md", "deleted");
+    await b.engine.flush();
+
+    // Both wanted it gone, so there is nothing to resurrect and nothing
+    // left to retry.
+    expect(await b.queue.list()).toHaveLength(0);
+    expect([...b.vault.files.keys()].some((p) => p.includes("conflict"))).toBe(false);
+  });
+
+  it("refuses downloaded content whose hash does not match the change feed (FR-16)", async () => {
+    const vaultKey = generateVaultKey();
+    const makeDeviceEngine = () => {
+      const api = new SynoraApiClient("http://fake");
+      const vault = new MemoryVault();
+      const store = new InMemoryKeyValueStore();
+      return {
+        engine: new SyncEngine({
+          api,
+          vaultId: VAULT_ID,
+          vaultKey,
+          vault,
+          queue: new SyncQueue(store, new InMemoryBlobStore()),
+          state: new LocalStateStore(store),
+          suppressor: new WriteSuppressor(),
+        }),
+        vault,
+        api,
+      };
+    };
+
+    const a = makeDeviceEngine();
+    const b = makeDeviceEngine();
+    await a.engine.handleLocalChange("note.md", "created", new TextEncoder().encode("draft one"));
+    await a.engine.flush();
+    await a.engine.handleLocalChange("note.md", "updated", new TextEncoder().encode("draft two"));
+    await a.engine.flush();
+    // B is fully caught up before the tampering, so anything that
+    // changes on it afterwards came from the change under test.
+    await b.engine.pull();
+    expect(new TextDecoder().decode(await b.vault.read("note.md"))).toBe("draft two");
+
+    await a.engine.handleLocalChange("note.md", "updated", new TextEncoder().encode("draft three"));
+    await a.engine.flush();
+
+    // Serve the file's OWN earlier blob in place of its current one -
+    // a rollback, not corruption. Those bytes are genuinely this
+    // vault's, encrypt under the right key and carry AAD naming this
+    // very file, so the authentication tag and the AAD check both pass
+    // happily. Only the hash the change feed declared tells them apart,
+    // and without that check the note silently reverts to the old text.
+    const feed = await b.api.getChanges(VAULT_ID, 0);
+    const oldBlobKey = feed.changes[0]!.blobKey!;
+    const currentBlobKey = feed.changes.at(-1)!.blobKey!;
+    const stale = await b.api.getObject(VAULT_ID, oldBlobKey);
+
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes(`/objects/${encodeURIComponent(currentBlobKey)}`)) {
+        return new Response(stale.slice().buffer as ArrayBuffer, { status: 200 });
+      }
+      return realFetch(input as RequestInfo, init);
+    }) as typeof fetch;
+
+    let skipped: string[] = [];
+    try {
+      ({ skipped } = await b.engine.pull());
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+
+    expect(skipped).toHaveLength(1);
+    // Crucially still "draft two" and not "draft one": the rollback was
+    // refused rather than written over the newer text.
+    expect(new TextDecoder().decode(await b.vault.read("note.md"))).toBe("draft two");
+  });
+
+  it("seals attachments under their own encryption context, notes under theirs (FR-12)", async () => {
+    const { engine, api } = buildEngine();
+
+    await engine.handleLocalChange("note.md", "created", new TextEncoder().encode("# a note"));
+    await engine.handleLocalChange("diagram.png", "created", new Uint8Array([137, 80, 78, 71]));
+    await engine.flush();
+
+    const changes = await api.getChanges(VAULT_ID, 0);
+    const contexts = new Map<string, string>();
+    for (const change of changes.changes) {
+      const envelope = decodeEnvelope(await api.getObject(VAULT_ID, change.blobKey!));
+      contexts.set(envelope.context, change.blobKey!);
+    }
+
+    // Separate contexts feed separate derived keys and distinct AAD, so
+    // a flaw in how one kind of content is sealed cannot be turned
+    // against the other.
+    expect([...contexts.keys()].sort()).toEqual(["attachment", "file-content"]);
+  });
+
+  it("still reads blobs written before attachments had their own context", async () => {
+    const { engine, vault, vaultKey, api } = buildEngine();
+
+    // Exactly what an older build wrote: a binary file sealed as
+    // "file-content". The context travels inside the envelope, so this
+    // has to keep decrypting untouched after the change above.
+    const content = new Uint8Array([137, 80, 78, 71, 13, 10]);
+    const manifest = encodeManifest({ fileId: "", logicalPath: "legacy.png", content });
+    const legacy = encodeEnvelope(encryptEnvelope(vaultKey, VAULT_ID, "legacy.png", "file-content", manifest));
+
+    const upload = await api.requestUpload(VAULT_ID);
+    await api.putBlob(upload.uploadUrl, legacy);
+    await api.commit(VAULT_ID, {
+      blobKey: upload.uploadId,
+      ciphertextHash: toHexDigest(legacy),
+      sizeBytes: legacy.byteLength,
+      operation: "created",
+      idempotencyKey: crypto.randomUUID(),
+    });
+
+    await engine.pull();
+    expect(new Uint8Array(await vault.read("legacy.png"))).toEqual(content);
   });
 
   it("never sends an empty-string fileId for a second edit to a not-yet-synced file", async () => {

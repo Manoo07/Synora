@@ -154,14 +154,19 @@ plaintext fields anywhere in the API. The server's `files` table has no
    - Verifies the uploaded blob exists, matches `sizeBytes`, and
      (re-hashed server-side) matches `ciphertextHash`. The server hashes
      ciphertext, not plaintext — it never decrypts.
+   - **If `idempotencyKey` was already committed for this vault, returns
+     the original result immediately** (safe retry after a dropped
+     response). This check comes *before* the base-version check below,
+     and the order is load-bearing: a retry sent after a `200` was lost
+     in transit carries a base version the first attempt already
+     superseded, so checking the base first would answer `409` to a
+     commit that in fact succeeded — defeating the whole point of the
+     idempotency key.
    - Verifies `files.current_version_id = baseVersionId` (or `fileId` does
      not yet exist, for a create). If it doesn't match, the commit is
      rejected with `409 Conflict` and the current server-side version is
      returned so the client can reconcile. The server never overwrites a
      newer version with an older one, and never guesses an intended merge.
-   - If `idempotencyKey` was already committed for this vault, returns the
-     original result instead of creating a duplicate (safe retry after a
-     dropped response).
    - Otherwise: allocates the next `sequence`, inserts `file_versions`,
      updates `files.current_version_id`, inserts `change_events`, commits.
 5. Client advances its local state only after receiving `200 Committed`.
@@ -174,10 +179,13 @@ only thing standing between concurrent writers and silent data loss.
 See the architecture doc for the full policy table. Protocol-relevant
 details:
 
-- A merge produced by a client is committed as a normal new version, except
-  `parent_version_id` may reference two parents (the local and remote
-  versions it merged). The server does not interpret merge semantics; it
-  only needs `baseVersionId` to equal the **remote** parent so the
+- A merge produced by a client is committed as a normal new version,
+  except it names both versions it reconciled. The field is
+  `parent_version_ids` — always the plural, a jsonb array holding 0
+  parents (an initial create), 1 (an ordinary edit) or 2 (a merge).
+  Earlier drafts of this document said `parent_version_id`; there is no
+  such column. The server does not interpret merge semantics; it only
+  needs `baseVersionId` to equal the **remote** parent so the
   optimistic-concurrency check still holds.
 - An unresolved conflict (overlapping edits, or any conflict involving a
   binary attachment) is committed as two sibling versions: the winning

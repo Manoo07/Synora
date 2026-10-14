@@ -53,3 +53,18 @@ describe("envelope encryption", () => {
     expect(() => decryptEnvelope(vaultKey, { ...envelope, formatVersion: 99 })).toThrow(EnvelopeIntegrityError);
   });
 });
+
+describe("manifest format version", () => {
+  it("refuses a manifest written by a newer plugin rather than guessing at it", () => {
+    const encoded = encodeManifest({ fileId: "f1", logicalPath: "note.md", content: new TextEncoder().encode("hi") });
+    // Same bytes, stamped with a format this build does not know. The
+    // safe answer is to stop: decoding it anyway could yield a
+    // plausible note with content silently missing, which would then be
+    // written back as the current version over the real one.
+    const fromTheFuture = new Uint8Array(encoded);
+    fromTheFuture[0] = 99;
+
+    expect(() => decodeManifest(fromTheFuture)).toThrow(/newer version of Synora/i);
+    expect(() => decodeManifest(encoded)).not.toThrow();
+  });
+});

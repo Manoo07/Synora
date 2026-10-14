@@ -13,6 +13,11 @@ export interface PendingOp {
   logicalPath: string;
   fileId?: string;
   baseVersionId?: string;
+  // Set only on a merge commit, naming both versions it reconciles.
+  // baseVersionId is one of them (the remote side, which is what the
+  // server's concurrency check compares against); this records the
+  // local side too, so the history shows where a merge actually joined.
+  parentVersionIds?: string[];
   operation: "created" | "updated" | "renamed" | "deleted";
   ciphertextHash: string;
   sizeBytes: number;
