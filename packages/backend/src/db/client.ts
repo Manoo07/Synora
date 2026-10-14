@@ -18,7 +18,15 @@ export interface DbHandle {
 // Hyperdrive maintains the real connection pool on Cloudflare's side, so
 // this is cheap in practice, not a full TCP handshake every time.
 export function openDb(connectionString: string): DbHandle {
-  const sql = postgres(connectionString, { max: 5, idle_timeout: 20 });
+  // One connection is all a request ever uses - every route, including
+  // the commit transaction, runs its queries one after another. The
+  // pool of five was spare capacity nothing drew on, and it multiplied:
+  // once the client began uploading four files at once, four requests
+  // times five reached Hyperdrive's origin limit of twenty exactly, so
+  // any pull or status check happening alongside them was refused and
+  // surfaced to the person as a 503. Two leaves headroom without
+  // pretending a request needs more.
+  const sql = postgres(connectionString, { max: 2, idle_timeout: 20 });
   const db = drizzle(sql, { schema });
   return { db, close: () => sql.end() };
 }

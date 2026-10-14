@@ -430,7 +430,18 @@ export default class SynoraPlugin extends Plugin {
       // is visible at all on a platform with no console access (mobile) -
       // console.error alone is invisible there. Shown for a full 15s
       // since it's often long enough to need copying down by hand.
-      new Notice(`Synora sync failed: ${err instanceof Error ? err.message : String(err)}`, 15_000);
+      // A server-side or network failure keeps everything queued and
+      // retries on the next cycle, so say that. "Sync failed" on its
+      // own reads like work was lost, which sends people looking for
+      // damage that is not there.
+      const transient = !(err instanceof ApiError) || err.status >= 500;
+      const detail = err instanceof Error ? err.message : String(err);
+      new Notice(
+        transient
+          ? `Synora: the server was unreachable (${detail}). Nothing was lost - it will retry shortly.`
+          : `Synora sync failed: ${detail}`,
+        15_000,
+      );
     } finally {
       this.isSyncing = false;
     }

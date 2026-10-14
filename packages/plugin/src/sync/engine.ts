@@ -97,6 +97,44 @@ export class SyncEngine {
     return (await this.deps.queue.list()).length;
   }
 
+  // Rebuilds a queued operation's encrypted payload from the file still
+  // on disk. Only the envelope was lost - the content it was made from
+  // is right there in the vault - so this is recoverable without
+  // involving the person at all.
+  //
+  // Deliberately returns the bytes instead of writing them back to the
+  // queue: this runs inside the concurrent upload phase, and the queue
+  // is read-modify-write over one file, so a write here could clobber a
+  // sibling's. The caller records the new hash and size in a map that
+  // the sequential commit phase reads.
+  private async rebuildPayload(
+    op: PendingOp,
+    rebuilt: Map<string, { ciphertextHash: string; sizeBytes: number }>,
+  ): Promise<Uint8Array | undefined> {
+    const { vault, vaultKey, vaultId } = this.deps;
+    try {
+      // A delete carries no content, so it needs nothing from disk.
+      const content = op.operation === "deleted" ? new Uint8Array(0) : await vault.read(op.logicalPath);
+      const manifestBytes = encodeManifest({
+        fileId: op.fileId ?? "",
+        logicalPath: op.logicalPath,
+        content,
+      });
+      const envelope = encodeEnvelope(
+        encryptEnvelope(vaultKey, vaultId, op.fileId ?? op.logicalPath, contextFor(op.logicalPath), manifestBytes),
+      );
+      rebuilt.set(op.idempotencyKey, {
+        ciphertextHash: toHex(sha256(envelope)),
+        sizeBytes: envelope.byteLength,
+      });
+      console.warn(`Synora: rebuilt the queued payload for "${op.logicalPath}" from the file on disk`);
+      return envelope;
+    } catch {
+      // The file is genuinely gone - nothing left to send.
+      return undefined;
+    }
+  }
+
   // Changes this device has not applied yet - the other direction from
   // pendingUploadCount, and the one that was missing.
   //
@@ -225,13 +263,20 @@ export class SyncEngine {
     // once and one's write silently erases the other's, which could
     // drop a queued conflict copy. The slow part is the upload anyway.
     const blobKeys = new Map<string, string>();
+    const rebuilt = new Map<string, { ciphertextHash: string; sizeBytes: number }>();
     const payloadMissing: PendingOp[] = [];
     const totalBytes = ops.reduce((sum, op) => sum + op.sizeBytes, 0);
     let doneBytes = 0;
     let doneCount = 0;
 
     const upload = async (op: PendingOp): Promise<void> => {
-      const bytes = await queue.readPayload(op.idempotencyKey);
+      // A missing payload used to mean "drop this edit and tell the
+      // person to re-save the file". That is far too harsh: the file is
+      // still sitting in the vault, so the envelope can simply be built
+      // again from it. Re-derive first, and only give up on an edit
+      // whose file has genuinely gone.
+      let bytes = await queue.readPayload(op.idempotencyKey);
+      if (!bytes) bytes = await this.rebuildPayload(op, rebuilt);
       if (!bytes) {
         payloadMissing.push(op);
       } else {
@@ -276,16 +321,17 @@ export class SyncEngine {
       const blobKey = blobKeys.get(op.idempotencyKey);
       if (!blobKey) continue; // never uploaded; stays queued for next cycle
       try {
-        const bytes = await queue.readPayload(op.idempotencyKey);
-        if (!bytes) continue;
-
+        // No payload read here on purpose. The bytes are already in R2
+        // and committing only needs the key, hash and size - and a
+        // rebuilt payload was never written back to the queue, so
+        // reading one would skip exactly the ops that just recovered.
         const result = await api.commit(vaultId, {
           fileId: op.fileId,
           baseVersionId: op.baseVersionId,
           parentVersionIds: op.parentVersionIds,
           blobKey,
-          ciphertextHash: op.ciphertextHash,
-          sizeBytes: op.sizeBytes,
+          ciphertextHash: rebuilt.get(op.idempotencyKey)?.ciphertextHash ?? op.ciphertextHash,
+          sizeBytes: rebuilt.get(op.idempotencyKey)?.sizeBytes ?? op.sizeBytes,
           operation: op.operation,
           idempotencyKey: op.idempotencyKey,
         });
@@ -312,7 +358,14 @@ export class SyncEngine {
         // to preserve both - download the winning remote version into the
         // vault at its normal path, and re-file our pending edit as an
         // explicit conflict copy rather than attempting a blind overwrite.
-        await this.resolveConflict(op, bytes, result.currentFileId, result.currentVersionId);
+        // Fetched only here, on the uncommon path, since resolving is
+        // the one thing that needs the plaintext side of the edit. A
+        // rebuilt payload is not in the queue, so rebuild again rather
+        // than abandoning a conflict we are able to resolve.
+        const localPayload =
+          (await queue.readPayload(op.idempotencyKey)) ?? (await this.rebuildPayload(op, rebuilt));
+        if (!localPayload) continue;
+        await this.resolveConflict(op, localPayload, result.currentFileId, result.currentVersionId);
       } catch (err) {
         console.error(`Synora: could not sync "${op.logicalPath}"`, err);
         if (err instanceof ApiError && err.status >= 400 && err.status < 500) {

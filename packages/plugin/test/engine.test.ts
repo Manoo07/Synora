@@ -755,6 +755,37 @@ describe("SyncEngine", () => {
     expect(Math.max(...seen.map((p) => p.doneCount))).toBe(5);
   });
 
+  it("rebuilds a lost payload from the file on disk instead of dropping the edit", async () => {
+    const vault = new MemoryVault();
+    const store = new InMemoryKeyValueStore();
+    const blobs = new InMemoryBlobStore();
+    const queue = new SyncQueue(store, blobs);
+    const engine = new SyncEngine({
+      api: new SynoraApiClient("http://fake"),
+      vaultId: VAULT_ID,
+      vaultKey: generateVaultKey(),
+      vault,
+      queue,
+      state: new LocalStateStore(store),
+      suppressor: new WriteSuppressor(),
+    });
+
+    const content = new TextEncoder().encode("the real content");
+    vault.files.set("note.md", content);
+    await engine.handleLocalChange("note.md", "created", content);
+
+    // The file is still in the vault, but the queued envelope is gone -
+    // the shape left behind by anything that clears the plugin's own
+    // folder. The content was never at risk, so this must not cost the
+    // edit or ask the person to re-save anything.
+    for (const key of await blobs.keys()) await blobs.delete(key);
+
+    const { failed } = await engine.flush();
+
+    expect(failed).toEqual([]);
+    expect(await queue.list()).toHaveLength(0);
+  });
+
   it("never sends an empty-string fileId for a second edit to a not-yet-synced file", async () => {
     const { engine, queue } = buildEngine();
 
