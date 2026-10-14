@@ -139,7 +139,9 @@ export class SynoraApiClient {
   }
 
   listVaults() {
-    return this.request<Array<{ id: string; keyEpoch: number }>>("/v1/vaults");
+    return this.request<
+      Array<{ id: string; keyEpoch: number; fileCount: number; sizeBytes: number; lastChangeAt: string | null }>
+    >("/v1/vaults");
   }
 
   enrollDevice(vaultId: string, deviceId: string, wrappedVaultKey: string, keyEpoch: number) {

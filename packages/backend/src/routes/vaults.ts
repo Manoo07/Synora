@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { eq, and, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { AppEnv } from "../context.js";
-import { vaults, vaultMembers, wrappedVaultKeys, devices } from "../db/schema.js";
+import { vaults, vaultMembers, wrappedVaultKeys, devices, files, fileVersions, changeEvents } from "../db/schema.js";
 import { requireAccountAuth, requireAuth, requireVaultAccess } from "../auth/middleware.js";
 import { forbidden } from "../lib/errors.js";
 
@@ -62,11 +62,42 @@ vaultRoutes.post("/", requireAuth, async (c) => {
 // which vault to recover before it has any device-level standing there.
 vaultRoutes.get("/", async (c) => {
   const userId = c.var.userId;
-  const rows = await c.env.DB.select({ vault: vaults })
+  // Carries enough to tell two vaults apart. An account can easily end
+  // up with several - creating one on a device that meant to recover
+  // into an existing one is a single mis-click - and an id alone gives
+  // someone no way to see which holds their notes. Confirmed live: a
+  // device sat attached to a one-file vault reporting itself fully
+  // synced while 877 changes waited in another.
+  //
+  // Counts and sizes only: the server already stores these as metadata
+  // and still cannot read a name, path or byte of content.
+  const rows = await c.env.DB.select({
+    vault: vaults,
+    fileCount: sql<string>`(
+      select count(*) from ${files}
+      where ${files.vaultId} = ${vaults.id} and ${files.deletedAt} is null
+    )`,
+    sizeBytes: sql<string>`(
+      select coalesce(sum(fv.size_bytes), 0) from ${files} f
+      join ${fileVersions} fv on fv.id = f.current_version_id
+      where f.vault_id = ${vaults.id} and f.deleted_at is null
+    )`,
+    lastChangeAt: sql<string | null>`(
+      select max(ce.created_at) from ${changeEvents} ce where ce.vault_id = ${vaults.id}
+    )`,
+  })
     .from(vaultMembers)
     .innerJoin(vaults, eq(vaults.id, vaultMembers.vaultId))
     .where(eq(vaultMembers.userId, userId));
-  return c.json(rows.map((r) => r.vault));
+
+  return c.json(
+    rows.map((r) => ({
+      ...r.vault,
+      fileCount: Number(r.fileCount),
+      sizeBytes: Number(r.sizeBytes),
+      lastChangeAt: r.lastChangeAt,
+    })),
+  );
 });
 
 // --- Device enrollment, scoped to a vault -------------------------------

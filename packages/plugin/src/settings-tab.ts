@@ -318,6 +318,12 @@ export class SynoraSettingTab extends PluginSettingTab {
       const vaultId = this.plugin.settings.vaultId;
       const vaultValue = this.addInfoRow(info, "Vault", vaultId.slice(0, 8) + "…");
       vaultValue.title = vaultId;
+      // What is actually in it, not just which one it is. An account
+      // can hold several vaults, and an id on its own gives no way to
+      // tell the one with your notes from an empty one created by a
+      // mis-click - which is how a device ended up sitting on a
+      // one-file vault reporting itself fully synced.
+      void this.renderVaultContents(vaultValue, vaultId, myGeneration);
       const syncValue = this.addInfoRow(info, "Sync", "Checking…");
       void this.renderSyncStatus(syncValue, myGeneration);
 
@@ -411,6 +417,31 @@ export class SynoraSettingTab extends PluginSettingTab {
   // Takes its target element and the display() generation it belongs to
   // directly, rather than reading a shared instance field - see
   // renderGeneration above for why.
+  private async renderVaultContents(target: HTMLElement, vaultId: string, generation: number): Promise<void> {
+    try {
+      const vaults = await this.plugin.api.listVaults();
+      if (generation !== this.renderGeneration) return;
+      const mine = vaults.find((v) => v.id === vaultId);
+      if (!mine) return;
+
+      const files = `${mine.fileCount} file${mine.fileCount === 1 ? "" : "s"}`;
+      target.setText(`${vaultId.slice(0, 8)}… · ${files} · ${formatBytes(mine.sizeBytes)}`);
+
+      // Say so plainly when the account has more than one, so an empty
+      // vault next to a full one is visible rather than something you
+      // find out by waiting for notes that never arrive.
+      if (vaults.length > 1) {
+        const others = vaults
+          .filter((v) => v.id !== vaultId)
+          .map((v) => `${v.id.slice(0, 8)}… (${v.fileCount})`)
+          .join(", ");
+        target.title = `This account has ${vaults.length} vaults. Others: ${others}`;
+      }
+    } catch {
+      // The id is already on screen; the contents are an extra.
+    }
+  }
+
   private async renderSyncStatus(target: HTMLElement, generation: number): Promise<void> {
     const [pending, incoming] = await Promise.all([
       this.plugin.getPendingUploadCount(),
