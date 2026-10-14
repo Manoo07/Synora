@@ -2,6 +2,7 @@ import { App, ButtonComponent, Notice, PluginSettingTab, Setting } from "obsidia
 import type SynoraPlugin from "./main.js";
 import { ApiError } from "./api/client.js";
 import { ICON_PACKS, type IconPackId } from "./icon-packs.js";
+import { ConfirmModal } from "./confirm-modal.js";
 
 function formatBytes(bytes: number): string {
   const mb = bytes / (1024 * 1024);
@@ -399,6 +400,44 @@ export class SynoraSettingTab extends PluginSettingTab {
       primaryDeviceEl.createEl("p", { text: "Checking primary device…", cls: "synora-muted" });
       void this.renderPrimaryDevice(primaryDeviceEl, myGeneration);
     }
+
+    new Setting(this.containerEl)
+      .setName("Use a different account")
+      .setDesc(
+        "Signs this device out and clears its local sync state, so another account can connect. Your notes " +
+          "are left exactly as they are. The old account keeps listing this device until you revoke it from " +
+          "somewhere else.",
+      )
+      .addButton((btn) =>
+        btn
+          .setButtonText("Sign out")
+          .setWarning()
+          .onClick(async () => {
+            // Unsent edits live only on this device, so losing them is
+            // the one part of signing out that cannot be undone - say
+            // how many, rather than a generic "are you sure".
+            const pending = await this.plugin.getPendingUploadCount();
+            const body = [
+              "This device will be signed out and its sync state cleared. Your notes stay where they are.",
+            ];
+            if (pending > 0) {
+              body.push(
+                `${pending} edit${pending === 1 ? "" : "s"} ${pending === 1 ? "has" : "have"} not been uploaded ` +
+                  `yet and will be lost. Sync first if you want to keep ${pending === 1 ? "it" : "them"}.`,
+              );
+            }
+            new ConfirmModal(this.app, {
+              title: "Sign out of this account?",
+              body,
+              confirmText: "Sign out",
+              onConfirm: () =>
+                void this.runBusy(btn, "Signing out...", async () => {
+                  await this.plugin.signOut();
+                  this.display();
+                }),
+            }).open();
+          }),
+      );
   }
 
   // A clean label/value row inside the account-status card, replacing a

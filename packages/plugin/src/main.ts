@@ -763,13 +763,59 @@ export default class SynoraPlugin extends Plugin {
   // "Create vault" instead of "Recover vault") with no other way back,
   // since once vaultId is set there was previously no way to change it
   // short of clearing the plugin's data file directly.
+  // Everything this device remembers about following one particular
+  // vault: the queued-but-unsent edits, the file records, and the feed
+  // cursor. All three are meaningless - worse, actively wrong - against
+  // a different vault, since the cursor is a position in that vault's
+  // feed and the records name its file ids. Left behind, a device that
+  // reattaches elsewhere asks for changes after a sequence the new
+  // vault has not reached and concludes there is nothing to download.
+  private async clearVaultScopedState(): Promise<void> {
+    const raw = ((await this.loadData()) as Record<string, unknown>) ?? {};
+    const store = new PluginDataStore(this, raw);
+    const blobs = new AdapterBlobStore(
+      this.app.vault.adapter,
+      `${this.app.vault.configDir}/plugins/${this.manifest.id}/pending`,
+    );
+    await new SyncQueue(store, blobs).clear();
+    await new LocalStateStore(store).clear();
+  }
+
   async disconnectFromVault(): Promise<void> {
     this.settings.vaultId = undefined;
     this.needsVaultKeyRecovery = false;
     await this.saveSettings();
+    await this.clearVaultScopedState();
     this.vaultKey = undefined;
     this.engine = undefined;
     new Notice("Disconnected from vault. Pick Recover vault access to reattach to the right one.");
+  }
+
+  // Signs this device out of the account entirely, so a different one
+  // can be used. Clears the device's own key pair too: that key IS this
+  // device's identity to the server, and keeping it while signed into
+  // another account would leave two accounts believing they own the
+  // same device.
+  //
+  // Notes are never touched. Nothing is removed server-side either, so
+  // the old account still lists this device until it is revoked from
+  // somewhere else - same as Disconnect.
+  async signOut(): Promise<void> {
+    await this.clearVaultScopedState();
+
+    this.settings.email = undefined;
+    this.settings.accessToken = undefined;
+    this.settings.deviceId = undefined;
+    this.settings.devicePublicKeyB64 = undefined;
+    this.settings.deviceSecretKeyB64 = undefined;
+    this.settings.vaultId = undefined;
+    await this.saveSettings();
+
+    this.api.setAccessToken(undefined);
+    this.vaultKey = undefined;
+    this.engine = undefined;
+    this.needsVaultKeyRecovery = false;
+    new Notice("Signed out. Your notes are untouched - sign in to connect a different account.");
   }
 
   // Vaults this device can attach to directly - no recovery code needed,

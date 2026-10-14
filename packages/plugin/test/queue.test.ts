@@ -104,6 +104,18 @@ describe("SyncQueue", () => {
     expect(new TextDecoder().decode(await queue.readPayload("op-1"))).toBe("current");
   });
 
+  it("clear() drops every op and its payload, leaving nothing bound to the old vault", async () => {
+    const blobs = new InMemoryBlobStore();
+    const queue = new SyncQueue(new InMemoryKeyValueStore(), blobs);
+    await queue.enqueue(makeOp("op-1"), payload("one"));
+    await queue.enqueue(makeOp("op-2"), payload("two"));
+
+    await queue.clear();
+
+    expect(await queue.list()).toEqual([]);
+    expect(await blobs.keys()).toEqual([]);
+  });
+
   it("prunes payloads orphaned by a crash between the queue's two writes", async () => {
     const blobs = new InMemoryBlobStore();
     const queue = new SyncQueue(new InMemoryKeyValueStore(), blobs);

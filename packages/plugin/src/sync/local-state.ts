@@ -65,6 +65,14 @@ export class LocalStateStore {
     await this.write(snapshot);
   }
 
+  // Drops every record and the cursor. Used when this device stops
+  // following a vault: the cursor is a position in THAT vault's feed and
+  // the records name THAT vault's file ids, so carrying either into a
+  // different vault makes the device skip changes it has never seen.
+  async clear(): Promise<void> {
+    await this.write({ lastAppliedSequence: 0, filesByPath: {} });
+  }
+
   async remove(path: string): Promise<void> {
     const snapshot = await this.read();
     delete snapshot.filesByPath[path];

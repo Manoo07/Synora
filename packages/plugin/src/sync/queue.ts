@@ -102,6 +102,14 @@ export class SyncQueue {
     await this.store.set(QUEUE_KEY, migrated);
   }
 
+  // Drops every queued operation and its payload. These are edits bound
+  // for a particular vault, so they cannot be carried to another one.
+  async clear(): Promise<void> {
+    for (const op of await this.list()) await this.blobs.delete(op.idempotencyKey);
+    await this.store.set(QUEUE_KEY, []);
+    await this.pruneOrphanedPayloads();
+  }
+
   // Clears payloads left behind by a crash between the two writes above.
   // Without this they are never referenced again and never deleted.
   async pruneOrphanedPayloads(): Promise<void> {
