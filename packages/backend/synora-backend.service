@@ -1,0 +1,32 @@
+# systemd unit for running the backend directly on an EC2 instance,
+# without Docker. Put the checkout in /opt/synora, run `npm ci` and
+# `npm run build` there, then:
+#   sudo cp synora-backend.service /etc/systemd/system/
+#   sudo systemctl enable --now synora-backend
+[Unit]
+Description=Synora backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=synora
+WorkingDirectory=/opt/synora/packages/backend
+# Secrets live here, readable only by the service user - not in the unit
+# file, which is world-readable.
+EnvironmentFile=/etc/synora/backend.env
+ExecStart=/usr/bin/node dist/server.js
+Restart=always
+RestartSec=5
+# The server closes its listener and drains the pool on SIGTERM, so give
+# it room to finish rather than killing it mid-request.
+KillSignal=SIGTERM
+TimeoutStopSec=20
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

@@ -9,24 +9,26 @@ export interface DbHandle {
   close(): Promise<void>;
 }
 
-// Workers forbids reusing I/O objects (sockets, streams) across requests —
-// each request gets its own isolate-level I/O context, so a postgres.js
-// connection opened during one request cannot be read from during the
-// next ("Cannot perform I/O on behalf of a different request"). That rules
-// out the usual "cache the client at module scope" pattern here: we open a
-// fresh connection per request and close it once the request is done.
-// Hyperdrive maintains the real connection pool on Cloudflare's side, so
-// this is cheap in practice, not a full TCP handshake every time.
-export function openDb(connectionString: string): DbHandle {
-  // One connection is all a request ever uses - every route, including
-  // the commit transaction, runs its queries one after another. The
-  // pool of five was spare capacity nothing drew on, and it multiplied:
-  // once the client began uploading four files at once, four requests
-  // times five reached Hyperdrive's origin limit of twenty exactly, so
-  // any pull or status check happening alongside them was refused and
-  // surfaced to the person as a 503. Two leaves headroom without
-  // pretending a request needs more.
-  const sql = postgres(connectionString, { max: 2, idle_timeout: 20 });
+// One pool for the process, opened at startup and kept.
+//
+// This used to open a fresh pool per request, because Workers forbid
+// reusing a socket across requests - each one gets its own I/O context,
+// so a connection opened during one could not be read from during the
+// next. Nothing about that applies to a long-running Node process, and
+// the workaround was expensive in a way that eventually bit: the pool
+// had to stay tiny to avoid multiplying across concurrent requests, and
+// four parallel uploads still managed to exhaust the origin limit and
+// surface as 503s. A single shared pool is both simpler and the thing
+// connection limits are actually designed around.
+export function openDb(connectionString: string, poolSize = 10): DbHandle {
+  const sql = postgres(connectionString, {
+    max: poolSize,
+    idle_timeout: 20,
+    // Postgres hosts drop connections that sit too long; without an
+    // upper bound the pool can hand out one the server has already
+    // forgotten, which fails as a confusing mid-query disconnect.
+    max_lifetime: 60 * 30,
+  });
   const db = drizzle(sql, { schema });
   return { db, close: () => sql.end() };
 }

@@ -34,7 +34,7 @@ never read note content, filenames, or folder structure.
          └──────────────────┬─────────────────────┘
                             ▼
             ┌───────────────────────────────┐
-            │  Cloudflare Worker (Hono)     │
+            │  Node service (Hono)          │
             │  - auth, quota, commit order  │
             │  - never decrypts anything    │
             └───────┬───────────────┬───────┘
@@ -61,9 +61,24 @@ rest of this document is a consequence of one of them.
 **C1 — The server must never be able to read anything.** Not content, not
 filenames, not folder paths. This is the product's reason to exist.
 
-**C2 — It must run free, indefinitely, on hobby infrastructure.**
-Cloudflare Workers free tier, R2 free tier, a free Postgres. No paid
-dependency, no billing integration.
+**C2 — It must run cheaply on infrastructure one person can own.**
+A single small server, a Postgres database, and R2 for blobs. No paid
+dependency beyond the host itself, and no billing integration.
+
+The backend began on Cloudflare Workers and moved to a plain Node
+service on EC2. Worth recording why the move was cheap: the app takes
+its database, bucket and secrets as an explicit bindings object rather
+than reaching for globals, so every route, the auth layer and garbage
+collection moved untouched. Only the entrypoint, the database client
+and the R2 adapter are runtime-specific, and the test suite never knew
+the difference because it always built that bindings object by hand.
+
+The move also deleted a workaround. Workers forbid reusing a socket
+across requests, so the database pool had to be rebuilt per request and
+kept tiny to avoid multiplying under concurrency - and it still managed
+to exhaust the connection limit once uploads ran four at a time. A
+long-lived pool in one process is both simpler and what connection
+limits are designed around.
 
 **C3 — It must run inside an Obsidian plugin**, on desktop *and* mobile,
 with no native code, no background process, and no control over when the

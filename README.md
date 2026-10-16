@@ -19,34 +19,36 @@ one plugin, and your devices stay in sync automatically in the background.
 ### 1. Deploy your own backend
 
 This is a one-time setup. You're deploying your own private copy of the
-Synora server to your own Cloudflare account — nobody else can see or use it.
+Synora server — nobody else can see or use it. It runs as an ordinary
+Node service, so anything that runs Node will do: an EC2 instance, a
+small VPS, or a container host.
+
+**You need:** somewhere to run Node 22+, a Postgres database, and an R2
+bucket for encrypted file storage.
+
+Create the R2 bucket in the Cloudflare dashboard, then an API token
+under **R2 → Manage R2 API Tokens** with *Object Read & Write* on it.
+Note the access key id, secret, and your account id.
 
 ```sh
 cd packages/backend
-npm install
+npm ci
 
-npx wrangler login
-npx wrangler r2 bucket create <pick-a-bucket-name>
-npx wrangler hyperdrive create <pick-a-name> --connection-string="<your-postgres-connection-string>"
+cp .env.example .env     # then fill it in - every value is explained there
+npm run db:migrate       # creates the schema
+npm run build
+npm start
 ```
 
-Open `wrangler.toml` and update `r2_buckets.bucket_name` and
-`hyperdrive.id` to match what the two commands above printed. Then:
+The server listens on port 8787 by default. Put TLS in front of it —
+nginx, Caddy, or an AWS load balancer — and point a hostname at it. The
+plugin talks to that hostname, so it needs a real certificate.
 
-```sh
-npx wrangler secret put JWT_SECRET      # paste any long random string
-DATABASE_URL=<your-postgres-connection-string> npm run db:migrate
-npx wrangler deploy
-```
+To keep it running across reboots, either use the included `Dockerfile`,
+or the `synora-backend.service` systemd unit (its header has the three
+commands to install it).
 
-The last command prints your server's URL, something like
-`https://synora-backend.<your-name>.workers.dev`. Save it — you'll enter it
-into the plugin in step 3.
-
-If your Postgres provider auto-pauses idle databases on its free tier, set
-up the included GitHub Actions workflow
-(`.github/workflows/keep-db-alive.yml`) by adding a `DATABASE_URL`
-repository secret — it pings the database every 12 hours to keep it awake.
+Save the public URL — you'll enter it into the plugin in step 3.
 
 ### 2. Install the plugin
 
@@ -112,7 +114,7 @@ open for your phone to sync, or the other way around.
 
 - **Storage is capped, not metered or billed.** Each account gets a free
   250MB storage allowance (shown as a usage line in the plugin settings),
-  and a global ceiling (`GLOBAL_STORAGE_CEILING_BYTES` in `wrangler.toml`,
+  and a global ceiling (`GLOBAL_STORAGE_CEILING_BYTES` in the backend's
   defaulting to 8GB — 80% of Cloudflare's free R2 tier) stops new signups
   before total usage could run up a real bill. There's no paid tier or
   billing integration yet — every account is free until that's built.
