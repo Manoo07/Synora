@@ -28,7 +28,7 @@ export const users = pgTable("users", {
   // slot back up). Checked only when a login sees a brand-new device
   // public key for this account - see routes/auth.ts. Unlike the storage
   // quota/global ceiling above, a device count isn't a real cost driver
-  // (no meaningful extra R2/Postgres/Workers cost per device) - this is
+  // (no meaningful extra storage, database or server cost per device) - this is
   // pure pricing-tier groundwork. Free-tier default is 7.
   deviceLimit: integer("device_limit").notNull().default(7),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -145,8 +145,8 @@ export const deviceCursors = pgTable("device_cursors", {
 
 // Fixed-window counter, serialized per key via pg_advisory_xact_lock in
 // auth/rate-limit.ts - the same technique already used for conditional
-// commits (routes/sync.ts). A prior KV-based counter and Cloudflare's
-// native rate-limit binding were both tried and confirmed live to not
+// commits (routes/sync.ts). A prior external-counter approach and a
+// platform-native rate-limit feature were both tried and confirmed live to not
 // actually enforce anything under concurrent requests (no atomicity
 // between reading and writing the count). This table, guarded by the
 // advisory lock, is genuinely atomic.

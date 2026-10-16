@@ -1,6 +1,6 @@
 import { beforeEach, afterAll, describe, expect, it } from "vitest";
 import { eq, and } from "drizzle-orm";
-import { app } from "../src/index.js";
+import { app } from "../src/app.js";
 import { users, devices } from "../src/db/schema.js";
 import { resetDb, testBindings, closeTestDb } from "./setup.js";
 import { registerUser } from "./helpers.js";
@@ -127,7 +127,7 @@ describe("auth", () => {
     expect(alice.accessToken).toBeTruthy();
   });
 
-  // Two prior rate-limiting attempts (a KV counter, then Cloudflare's
+  // Two prior rate-limiting attempts (an external counter, then a platform's
   // native binding) were both confirmed live to let every request through
   // under concurrent load - neither had real atomicity between reading
   // the count and writing it back. This fires registrations genuinely

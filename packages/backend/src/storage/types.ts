@@ -1,7 +1,10 @@
-// Minimal duck-typed subset of Cloudflare's R2Bucket that our routes
-// actually use. A real R2Bucket satisfies this structurally, so production
-// code just passes the binding straight through; tests pass an in-memory
-// fake instead (see test/fakes/memory-bucket.ts).
+// The entire storage surface the routes use - four methods, no more.
+//
+// Keeping it this small is what let the R2 access swap from a Workers
+// binding to the S3 API without a single route noticing, and it is why
+// the tests can run against an in-memory fake (test/fakes/memory-bucket.ts)
+// rather than real object storage. Anything added here has to be
+// implemented twice, so add sparingly.
 export interface BlobHead {
   size: number;
   customMetadata?: Record<string, string>;

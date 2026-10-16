@@ -1,5 +1,5 @@
 import { beforeEach, afterAll, describe, expect, it } from "vitest";
-import { app } from "../src/index.js";
+import { app } from "../src/app.js";
 import { resetDb, testBindings, closeTestDb } from "./setup.js";
 import { registerUser, createVault } from "./helpers.js";
 

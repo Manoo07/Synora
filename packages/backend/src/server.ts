@@ -1,6 +1,6 @@
 import { serve } from "@hono/node-server";
 import cron from "node-cron";
-import { app } from "./index.js";
+import { app } from "./app.js";
 import { loadConfig } from "./config.js";
 import { openDb } from "./db/client.js";
 import { R2BlobBucket } from "./storage/r2.js";

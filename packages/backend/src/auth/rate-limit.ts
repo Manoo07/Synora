@@ -5,7 +5,7 @@ import { rateLimitCounters } from "../db/schema.js";
 // Fixed-window counter per key (e.g. "register:<ip>"), serialized with the
 // same pg_advisory_xact_lock technique the commit protocol uses
 // (routes/sync.ts) - that's what makes this actually atomic, unlike the
-// two prior attempts (a KV counter, then Cloudflare's native rate-limit
+// two prior attempts (an external counter store, then a platform-native rate-limit
 // binding) that were both confirmed live to let every request through
 // under concurrent load: neither had any atomicity between reading the
 // current count and writing the incremented one back.

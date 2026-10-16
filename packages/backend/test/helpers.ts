@@ -1,4 +1,4 @@
-import { app } from "../src/index.js";
+import { app } from "../src/app.js";
 import type { AppBindings } from "../src/context.js";
 
 export async function registerUser(bindings: AppBindings, email: string) {

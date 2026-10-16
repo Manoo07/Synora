@@ -1,9 +1,10 @@
-// Settings used to arrive as wrangler bindings, which fail loudly at
-// deploy time when one is missing. A plain process is not so kind: an
-// unset variable is just `undefined`, and the first thing to notice is
-// usually a request failing in a way that looks like something else.
-// So everything is read and checked once, at startup, before the server
-// accepts anything.
+// Every setting is read and checked once, at startup, before the server
+// accepts a single request.
+//
+// An unset environment variable is just `undefined`: nothing complains,
+// and the first sign of trouble is usually a request failing much later
+// in a way that looks like something else entirely. Failing loudly here,
+// naming the variable, costs one restart instead of an afternoon.
 
 export interface Config {
   port: number;

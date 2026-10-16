@@ -2,13 +2,15 @@
 
 Synora keeps your Obsidian vault in sync across devices — laptop, phone,
 anywhere you use Obsidian — without any third-party service ever being able
-to read your notes. You run your own backend (free, on Cloudflare), install
+to read your notes. You run your own backend on a server you control, install
 one plugin, and your devices stay in sync automatically in the background.
 
 ## What you need
 
 - An Obsidian vault (desktop and/or mobile)
-- A free [Cloudflare](https://dash.cloudflare.com/sign-up) account
+- Somewhere to run Node 22+ (an EC2 instance, a VPS, a container host)
+- A [Cloudflare](https://dash.cloudflare.com/sign-up) account — used only
+  for R2 object storage, which holds your encrypted files
 - A free Postgres database (e.g. [Aiven](https://aiven.io/) or
   [Neon](https://neon.tech) have free tiers) — only needed once, during setup
 - [Node.js](https://nodejs.org) and the [GitHub CLI](https://cli.github.com/)

@@ -10,7 +10,7 @@ import { badRequest, unauthorized, serviceUnavailable, tooManyRequests, deviceLi
 
 export const authRoutes = new Hono<AppEnv>();
 
-// A prior KV-based counter and Cloudflare's native rate-limit binding were
+// A prior external-counter approach and a platform-native rate-limit feature were
 // both tried here and confirmed live to not actually enforce anything
 // under concurrent requests - neither had real atomicity between reading
 // the current count and writing the incremented one back, so a burst of
@@ -45,7 +45,7 @@ authRoutes.post("/register", async (c) => {
   if (existing.length > 0) throw badRequest("Email already registered");
 
   // Blocks only *new* signups once total usage nears the operator's
-  // Cloudflare free-tier R2 allowance - never affects existing accounts'
+  // operator's R2 allowance - never affects existing accounts'
   // syncing. See context.ts GLOBAL_STORAGE_CEILING_BYTES.
   const usageRows = await c.env.DB.select({
     totalUsed: sql<string>`coalesce(sum(${users.storageBytesUsed}), 0)`,

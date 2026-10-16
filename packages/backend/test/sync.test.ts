@@ -1,6 +1,6 @@
 import { beforeEach, afterAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
-import { app } from "../src/index.js";
+import { app } from "../src/app.js";
 import { users, devices } from "../src/db/schema.js";
 import { resetDb, testBindings, closeTestDb } from "./setup.js";
 import { registerUser, createVault, requestUpload, putBlob, commit } from "./helpers.js";

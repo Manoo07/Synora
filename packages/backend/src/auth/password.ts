@@ -1,13 +1,24 @@
-// PBKDF2 via WebCrypto (SubtleCrypto), available in both Workers and Node.
-// bcrypt/argon2 aren't available in the Workers runtime without a native
-// binding, so this is the practical choice here. Replace with a vetted
-// hosted auth provider before real users — see protocol-spec.md §2 and the
-// architecture doc's "do not invent authentication" note.
+// PBKDF2 via WebCrypto. Replace with a vetted hosted auth provider
+// before real users — see protocol-spec.md §2 and the architecture
+// doc's "do not invent authentication" note.
 //
-// 100,000 is the real `workerd` runtime's hard cap on PBKDF2 iterations
-// (confirmed in production: higher counts throw `NotSupportedError` there,
-// even though Miniflare's local dev crypto backend silently allows more -
-// this exact mismatch is why it worked in `wrangler dev` but not deployed).
+// Worth knowing that the reason for this choice has expired. PBKDF2 was
+// picked because argon2 and bcrypt need a native module, which the
+// Workers runtime could not load. On Node they are both available, and
+// argon2id is the better algorithm.
+//
+// It has not been changed, deliberately: a hash is only verifiable by
+// the algorithm that produced it, so switching invalidates every
+// existing password and locks people out until they reset. Doing it
+// properly means verifying against the old scheme and re-hashing on
+// next successful login, which is worth doing - just not silently, as
+// part of a runtime migration.
+//
+// The 100,000 iterations are a leftover of the same constraint: it was
+// the Workers runtime's hard cap, found the hard way when a higher
+// value that worked locally was rejected once deployed. Node has no
+// such ceiling, so this can be raised whenever the re-hash path above
+// exists to carry old hashes forward.
 const ITERATIONS = 100_000;
 const SALT_BYTES = 16;
 const KEY_LENGTH = 32;
