@@ -1,0 +1,18 @@
+{
+  "name": "synora",
+  "private": true,
+  "workspaces": [
+    "packages/backend",
+    "packages/plugin"
+  ],
+  "scripts": {
+    "backend": "npm run --workspace @synora/backend",
+    "build": "npm run build --workspace @synora/backend",
+    "start": "npm run start --workspace @synora/backend",
+    "dev": "npm run dev --workspace @synora/backend",
+    "db:migrate": "npm run db:migrate --workspace @synora/backend",
+    "gc:dry-run": "npm run gc:dry-run --workspace @synora/backend",
+    "test": "npm run test --workspace @synora/backend && npm run test --workspace synora-sync",
+    "typecheck": "npm run typecheck --workspace @synora/backend && npm run typecheck --workspace synora-sync"
+  }
+}

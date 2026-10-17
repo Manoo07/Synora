@@ -47,8 +47,9 @@ nginx, Caddy, or an AWS load balancer — and point a hostname at it. The
 plugin talks to that hostname, so it needs a real certificate.
 
 To keep it running across reboots, either use the included `Dockerfile`,
-or the `synora-backend.service` systemd unit (its header has the three
-commands to install it).
+or the `synora-backend.service` systemd unit. For a full EC2 walkthrough
+— instance, TLS, systemd and cut-over — see
+[`docs/deploy-ec2.md`](docs/deploy-ec2.md).
 
 Save the public URL — you'll enter it into the plugin in step 3.
 
