@@ -116,6 +116,8 @@ open for your phone to sync, or the other way around.
 - [`docs/protocol-spec.md`](docs/protocol-spec.md) — the wire contract
   between plugin and backend.
 - [`docs/deploy-ec2.md`](docs/deploy-ec2.md) — standing up a server.
+- [`PENDING.md`](PENDING.md) — what is and is not implemented, triaged
+  against the code, including one known convergence defect.
 
 ## Known limitations
 
