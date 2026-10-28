@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 556" width="1040" height="556" role="img" aria-label="Receiving changes: the pull path - An ordered log replayed from wherever this device left off" font-family="Inter, 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif">
+<title>Receiving changes: the pull path - An ordered log replayed from wherever this device left off</title>
+<rect width="1040" height="556" fill="#FFFFFF"/>
+<text x="24" y="38" font-size="18" font-weight="700" fill="#1D2330">Receiving changes: the pull path</text>
+<text x="24" y="60" font-size="13" fill="#5C6573">An ordered log replayed from wherever this device left off</text>
+<g transform="translate(0,84)">
+<path d="M250,103.5 L267.5,103.5 Q270,103.5 270,101 L270,101 Q270,98.5 272.5,98.5 L282,98.5" fill="none" stroke="#7D8796" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M290,98.5 L281,103 L281,94 Z" fill="#7D8796"/>
+<path d="M510,98.5 L542,98.5" fill="none" stroke="#7D8796" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M550,98.5 L541,103 L541,94 Z" fill="#7D8796"/>
+<path d="M770,98.5 L802,98.5" fill="none" stroke="#7D8796" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M810,98.5 L801,103 L801,94 Z" fill="#7D8796"/>
+<path d="M905,127 L905,182 Q905,190 897,190 L408,190 Q400,190 400,198 L400,242" fill="none" stroke="#7D8796" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M400,250 L395.5,241 L404.5,241 Z" fill="#7D8796"/>
+<path d="M905,127 L905,152 Q905,160 897,160 L148,160 Q140,160 140,168 L140,242" fill="none" stroke="#D9480F" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M140,250 L135.5,241 L144.5,241 Z" fill="#D9480F"/>
+<path d="M510,278.5 L537,278.5" fill="none" stroke="#7D8796" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M545,278.5 L536,283 L536,274 Z" fill="#7D8796"/>
+<path d="M755,278.5 L776,278.5 Q778.5,278.5 778.5,281 L778.5,281 Q778.5,283.5 781,283.5 L794,283.5" fill="none" stroke="#7D8796" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M802,283.5 L793,288 L793,279 Z" fill="#7D8796"/>
+<path d="M30,76 L30,131 A110,6 0 0 0 250,131 L250,76" fill="#FFFFFF" stroke="#C5CBD3" stroke-width="1.25"/>
+<ellipse cx="140" cy="76" rx="110" ry="6" fill="#FFFFFF" stroke="#C5CBD3" stroke-width="1.25"/>
+<text x="140" y="103.2" text-anchor="middle" font-size="13" font-weight="600" fill="#1D2330">Local cursor</text>
+<text x="140" y="120" text-anchor="middle" font-size="11" fill="#5C6573">last sequence applied</text>
+<rect x="290" y="70" width="220" height="57" rx="8" fill="#FFFFFF" stroke="#C5CBD3" stroke-width="1.25"/>
+<text x="400" y="95.2" text-anchor="middle" font-size="13" font-weight="600" fill="#1D2330">Ask for changes</text>
+<text x="400" y="112" text-anchor="middle" font-size="11" fill="#5C6573">everything after it</text>
+<rect x="550" y="70" width="220" height="57" rx="8" fill="#FFFFFF" stroke="#C5CBD3" stroke-width="1.25"/>
+<text x="660" y="95.2" text-anchor="middle" font-size="13" font-weight="600" fill="#1D2330">Download blob</text>
+<text x="660" y="112" text-anchor="middle" font-size="11" fill="#5C6573">one per change, in order</text>
+<rect x="810" y="70" width="190" height="57" rx="8" fill="#FFF3EC" stroke="#EE9B74" stroke-width="1.25"/>
+<text x="905" y="95.2" text-anchor="middle" font-size="13" font-weight="600" fill="#1D2330">Verify</text>
+<text x="905" y="112" text-anchor="middle" font-size="11" fill="#D9480F">hash, tag and binding</text>
+<rect x="290" y="250" width="220" height="57" rx="8" fill="#FFFFFF" stroke="#C5CBD3" stroke-width="1.25"/>
+<text x="400" y="275.2" text-anchor="middle" font-size="13" font-weight="600" fill="#1D2330">Decrypt</text>
+<text x="400" y="292" text-anchor="middle" font-size="11" fill="#5C6573">path comes from inside</text>
+<rect x="545" y="250" width="210" height="57" rx="8" fill="#FFFFFF" stroke="#C5CBD3" stroke-width="1.25"/>
+<text x="650" y="275.2" text-anchor="middle" font-size="13" font-weight="600" fill="#1D2330">Apply to vault</text>
+<text x="650" y="292" text-anchor="middle" font-size="11" fill="#5C6573">create, update, rename</text>
+<path d="M802,256 L802,311 A98,6 0 0 0 998,311 L998,256" fill="#FFFFFF" stroke="#C5CBD3" stroke-width="1.25"/>
+<ellipse cx="900" cy="256" rx="98" ry="6" fill="#FFFFFF" stroke="#C5CBD3" stroke-width="1.25"/>
+<text x="900" y="283.2" text-anchor="middle" font-size="13" font-weight="600" fill="#1D2330">Advance cursor</text>
+<text x="900" y="300" text-anchor="middle" font-size="11" fill="#5C6573">only after it is on disk</text>
+<rect x="30" y="250" width="220" height="57" rx="8" fill="#FFF3EC" stroke="#EE9B74" stroke-width="1.25"/>
+<text x="140" y="275.2" text-anchor="middle" font-size="13" font-weight="600" fill="#1D2330">Refused</text>
+<text x="140" y="292" text-anchor="middle" font-size="11" fill="#D9480F">reported, never applied</text>
+<rect x="628.9" y="181" width="47.2" height="18" rx="4" fill="#FFFFFF"/>
+<text x="652.5" y="194" text-anchor="middle" font-size="11" fill="#5C6573">trusted</text>
+<rect x="491.3" y="151" width="62.4" height="18" rx="4" fill="#FFFFFF"/>
+<text x="522.5" y="164" text-anchor="middle" font-size="11" fill="#D9480F">mismatch</text>
+<text x="520" y="370" text-anchor="middle" font-size="11" fill="#D9480F">The hash the feed declared is what catches a server replaying an older version of the same file: those bytes are authentic and bound to the right slot, so encryption alone would</text>
+<text x="520" y="384" text-anchor="middle" font-size="11" fill="#D9480F">accept them.</text>
+</g>
+<line x1="24" y1="497.2" x2="46" y2="497.2" stroke="#7D8796" stroke-width="1.6"/>
+<path d="M52,497.2 L43,492.7 L43,501.7 Z" fill="#7D8796"/>
+<text x="60" y="501.2" font-size="11" fill="#5C6573">Normal path</text>
+<line x1="148.39" y1="497.2" x2="170.39" y2="497.2" stroke="#D9480F" stroke-width="1.6"/>
+<path d="M176.39,497.2 L167.39,492.7 L167.39,501.7 Z" fill="#D9480F"/>
+<text x="184.39" y="501.2" font-size="11" fill="#5C6573">Integrity gate</text>
+<line x1="24" y1="515.2" x2="1016" y2="515.2" stroke="#E4E7EC" stroke-width="1"/>
+<text x="24" y="535.2" font-size="12" fill="#5C6573">The cursor moves only after a change is durably applied, so an interrupted pull resumes rather than skipping.</text>
+</svg>

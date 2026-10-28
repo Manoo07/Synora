@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 652" width="1040" height="652" role="img" aria-label="Synora system topology - One trust boundary: plaintext never crosses it" font-family="Inter, 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif">
+<title>Synora system topology - One trust boundary: plaintext never crosses it</title>
+<rect width="1040" height="652" fill="#FFFFFF"/>
+<text x="24" y="38" font-size="18" font-weight="700" fill="#1D2330">Synora system topology</text>
+<text x="24" y="60" font-size="13" fill="#5C6573">One trust boundary: plaintext never crosses it</text>
+<g transform="translate(0,84)">
+<rect x="24" y="0" width="400" height="450" rx="12" fill="#F7F8FA" stroke="#E4E7EC"/>
+<text x="40" y="25" font-size="13" font-weight="700" fill="#1D2330">Your devices</text>
+<text x="40" y="43" font-size="11" fill="#5C6573">hold the vault key - all plaintext lives here</text>
+<rect x="560" y="0" width="456" height="450" rx="12" fill="#F7F8FA" stroke="#E4E7EC"/>
+<text x="576" y="25" font-size="13" font-weight="700" fill="#1D2330">Server you run</text>
+<text x="576" y="43" font-size="11" fill="#5C6573">holds ciphertext, opaque ids and wrapped keys</text>
+<path d="M224,143 L224,218" fill="none" stroke="#7D8796" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M224,226 L219.5,217 L228.5,217 Z" fill="#7D8796"/>
+<path d="M224,291 L224,340" fill="none" stroke="#7D8796" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M224,348 L219.5,339 L228.5,339 Z" fill="#7D8796"/>
+<path d="M224,283 L228.5,292 L219.5,292 Z" fill="#7D8796"/>
+<path d="M364,254.5 L630,254.5" fill="none" stroke="#D9480F" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M638,254.5 L629,259 L629,250 Z" fill="#D9480F"/>
+<path d="M788,283 L788,307.5 Q788,315.5 780,315.5 L696,315.5 Q688,315.5 688,323.5 L688,340" fill="none" stroke="#7D8796" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M688,348 L683.5,339 L692.5,339 Z" fill="#7D8796"/>
+<path d="M788,283 L788,307.5 Q788,315.5 796,315.5 L896,315.5 Q904,315.5 904,323.5 L904,340" fill="none" stroke="#7D8796" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M904,348 L899.5,339 L908.5,339 Z" fill="#7D8796"/>
+<rect x="84" y="86" width="280" height="57" rx="8" fill="#FFFFFF" stroke="#C5CBD3" stroke-width="1.25" stroke-dasharray="5 4"/>
+<text x="224" y="111.2" text-anchor="middle" font-size="13" font-weight="600" fill="#1D2330">Obsidian vault</text>
+<text x="224" y="128" text-anchor="middle" font-size="11" fill="#5C6573">your notes, on disk</text>
+<rect x="84" y="226" width="280" height="57" rx="8" fill="#FFF3EC" stroke="#EE9B74" stroke-width="1.25"/>
+<text x="224" y="251.2" text-anchor="middle" font-size="13" font-weight="600" fill="#1D2330">Synora plugin</text>
+<text x="224" y="268" text-anchor="middle" font-size="11" fill="#D9480F">diff, merge, encrypt</text>
+<path d="M84,354 L84,409 A140,6 0 0 0 364,409 L364,354" fill="#FFFFFF" stroke="#C5CBD3" stroke-width="1.25"/>
+<ellipse cx="224" cy="354" rx="140" ry="6" fill="#FFFFFF" stroke="#C5CBD3" stroke-width="1.25"/>
+<text x="224" y="381.2" text-anchor="middle" font-size="13" font-weight="600" fill="#1D2330">Pending queue</text>
+<text x="224" y="398" text-anchor="middle" font-size="11" fill="#5C6573">encrypted, survives a restart</text>
+<rect x="638" y="226" width="300" height="57" rx="8" fill="#EEF4FB" stroke="#9DB7D9" stroke-width="1.25"/>
+<text x="788" y="251.2" text-anchor="middle" font-size="13" font-weight="600" fill="#1D2330">Node service</text>
+<text x="788" y="268" text-anchor="middle" font-size="11" fill="#5C6573">Hono on EC2</text>
+<path d="M582,354 L582,409 A106,6 0 0 0 794,409 L794,354" fill="#FFFFFF" stroke="#C5CBD3" stroke-width="1.25"/>
+<ellipse cx="688" cy="354" rx="106" ry="6" fill="#FFFFFF" stroke="#C5CBD3" stroke-width="1.25"/>
+<text x="688" y="381.2" text-anchor="middle" font-size="13" font-weight="600" fill="#1D2330">PostgreSQL</text>
+<text x="688" y="398" text-anchor="middle" font-size="11" fill="#5C6573">versions, order, wrapped keys</text>
+<path d="M814,354 L814,409 A90,6 0 0 0 994,409 L994,354" fill="#FFFFFF" stroke="#C5CBD3" stroke-width="1.25"/>
+<ellipse cx="904" cy="354" rx="90" ry="6" fill="#FFFFFF" stroke="#C5CBD3" stroke-width="1.25"/>
+<text x="904" y="381.2" text-anchor="middle" font-size="13" font-weight="600" fill="#1D2330">R2</text>
+<text x="904" y="398" text-anchor="middle" font-size="11" fill="#5C6573">encrypted blobs</text>
+<rect x="232" y="175.5" width="66.6" height="18" rx="4" fill="#FFFFFF"/>
+<text x="265.3" y="188.5" text-anchor="middle" font-size="11" fill="#5C6573">file events</text>
+<rect x="232" y="306.5" width="71" height="18" rx="4" fill="#FFFFFF"/>
+<text x="267.5" y="319.5" text-anchor="middle" font-size="11" fill="#5C6573">persist first</text>
+<rect x="477.8" y="245.5" width="46.3" height="18" rx="4" fill="#FFFFFF"/>
+<text x="501" y="258.5" text-anchor="middle" font-size="11" fill="#D9480F">upload</text>
+<text x="520" y="480" text-anchor="middle" font-size="11" fill="#D9480F">The server can count files and see their sizes. It cannot read a note, a filename or a folder path - all three live inside the encrypted payload.</text>
+</g>
+<line x1="24" y1="593.2" x2="46" y2="593.2" stroke="#7D8796" stroke-width="1.6"/>
+<path d="M52,593.2 L43,588.7 L43,597.7 Z" fill="#7D8796"/>
+<text x="60" y="597.2" font-size="11" fill="#5C6573">Local data flow</text>
+<line x1="167.75" y1="593.2" x2="189.75" y2="593.2" stroke="#D9480F" stroke-width="1.6"/>
+<path d="M195.75,593.2 L186.75,588.7 L186.75,597.7 Z" fill="#D9480F"/>
+<text x="203.75" y="597.2" font-size="11" fill="#5C6573">Leaves the device, encrypted</text>
+<line x1="24" y1="611.2" x2="1016" y2="611.2" stroke="#E4E7EC" stroke-width="1"/>
+<text x="24" y="631.2" font-size="12" fill="#5C6573">Everything able to read your notes runs on your devices; the server only ever stores what it cannot decrypt.</text>
+</svg>

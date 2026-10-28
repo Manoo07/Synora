@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 572" width="1040" height="572" role="img" aria-label="Key hierarchy - One vault key, generated on a device and never transmitted in the clear" font-family="Inter, 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif">
+<title>Key hierarchy - One vault key, generated on a device and never transmitted in the clear</title>
+<rect width="1040" height="572" fill="#FFFFFF"/>
+<text x="24" y="38" font-size="18" font-weight="700" fill="#1D2330">Key hierarchy</text>
+<text x="24" y="60" font-size="13" fill="#5C6573">One vault key, generated on a device and never transmitted in the clear</text>
+<g transform="translate(0,84)">
+<path d="M520,57 L520,120.5 Q520,128.5 512,128.5 L180,128.5 Q172,128.5 172,136.5 L172,192" fill="none" stroke="#7D8796" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M172,200 L167.5,191 L176.5,191 Z" fill="#7D8796"/>
+<path d="M520,57 L520,120.5 Q520,128.5 512,128.5 L504,128.5 Q496,128.5 496,136.5 L496,192" fill="none" stroke="#7D8796" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M496,200 L491.5,191 L500.5,191 Z" fill="#7D8796"/>
+<path d="M520,57 L520,120.5 Q520,128.5 528,128.5 L832,128.5 Q840,128.5 840,136.5 L840,192" fill="none" stroke="#7D8796" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M840,200 L835.5,191 L844.5,191 Z" fill="#7D8796"/>
+<rect x="330" y="0" width="380" height="57" rx="8" fill="#FFF3EC" stroke="#EE9B74" stroke-width="1.25"/>
+<text x="520" y="25.2" text-anchor="middle" font-size="13" font-weight="600" fill="#1D2330">Vault key</text>
+<text x="520" y="42" text-anchor="middle" font-size="11" fill="#D9480F">random 256-bit, created client side</text>
+<rect x="32" y="200" width="280" height="71" rx="8" fill="#FFFFFF" stroke="#C5CBD3" stroke-width="1.25"/>
+<text x="172" y="225.2" text-anchor="middle" font-size="13" font-weight="600" fill="#1D2330">Wrapped per device</text>
+<text x="172" y="242" text-anchor="middle" font-size="11" fill="#5C6573">sealed to that device's public key</text>
+<text x="172" y="256" text-anchor="middle" font-size="11" fill="#5C6573">server holds it, cannot open it</text>
+<rect x="356" y="200" width="280" height="71" rx="8" fill="#FFFFFF" stroke="#C5CBD3" stroke-width="1.25"/>
+<text x="496" y="225.2" text-anchor="middle" font-size="13" font-weight="600" fill="#1D2330">Wrapped for recovery</text>
+<text x="496" y="242" text-anchor="middle" font-size="11" fill="#5C6573">sealed to the code shown once</text>
+<text x="496" y="256" text-anchor="middle" font-size="11" fill="#5C6573">the way back with no device left</text>
+<rect x="670" y="200" width="340" height="71" rx="8" fill="#EEF4FB" stroke="#9DB7D9" stroke-width="1.25"/>
+<text x="840" y="225.2" text-anchor="middle" font-size="13" font-weight="600" fill="#1D2330">Derived per operation</text>
+<text x="840" y="242" text-anchor="middle" font-size="11" fill="#5C6573">HKDF + a context string, never stored</text>
+<text x="840" y="256" text-anchor="middle" font-size="11" fill="#5C6573">file-content, attachment, vault-name, preferences</text>
+<text x="840" y="330" text-anchor="middle" font-size="11" fill="#5C6573">Separate contexts mean a flaw in how one kind of content is sealed</text>
+<text x="840" y="344" text-anchor="middle" font-size="11" fill="#5C6573">cannot be turned against another.</text>
+<text x="520" y="400" text-anchor="middle" font-size="11" fill="#5C6573">A device is revoked by deleting its wrapped copy. That stops it receiving anything new, but it already knows the key - only rotating the vault key takes back what it has already seen.</text>
+</g>
+<line x1="24" y1="513.2" x2="46" y2="513.2" stroke="#D9480F" stroke-width="1.6"/>
+<path d="M52,513.2 L43,508.7 L43,517.7 Z" fill="#D9480F"/>
+<text x="60" y="517.2" font-size="11" fill="#5C6573">Never leaves a device unwrapped</text>
+<line x1="24" y1="531.2" x2="1016" y2="531.2" stroke="#E4E7EC" stroke-width="1"/>
+<text x="24" y="551.2" font-size="12" fill="#5C6573">The server stores wrapped copies it cannot open, and never sees a derived key at all.</text>
+</svg>

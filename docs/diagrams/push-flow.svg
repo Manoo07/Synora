@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 712" width="1040" height="712" role="img" aria-label="Saving a note: the push path - Encrypted and written to disk before any network call" font-family="Inter, 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif">
+<title>Saving a note: the push path - Encrypted and written to disk before any network call</title>
+<rect width="1040" height="712" fill="#FFFFFF"/>
+<text x="24" y="38" font-size="18" font-weight="700" fill="#1D2330">Saving a note: the push path</text>
+<text x="24" y="60" font-size="13" fill="#5C6573">Encrypted and written to disk before any network call</text>
+<g transform="translate(0,84)">
+<path d="M230,98.5 L262,98.5" fill="none" stroke="#7D8796" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M270,98.5 L261,103 L261,94 Z" fill="#7D8796"/>
+<path d="M470,98.5 L502,98.5" fill="none" stroke="#7D8796" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M510,98.5 L501,103 L501,94 Z" fill="#7D8796"/>
+<path d="M710,98.5 L742,98.5" fill="none" stroke="#7D8796" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M750,98.5 L741,103 L741,94 Z" fill="#7D8796"/>
+<path d="M850,127 L850,240.5 Q850,248.5 842,248.5 L738,248.5" fill="none" stroke="#7D8796" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M730,248.5 L739,244 L739,253 Z" fill="#7D8796"/>
+<path d="M610,277 L610,310.5 Q610,318.5 602,318.5 L258,318.5 Q250,318.5 250,326.5 L250,352" fill="none" stroke="#7D8796" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M250,360 L245.5,351 L254.5,351 Z" fill="#7D8796"/>
+<path d="M610,277 L610,352" fill="none" stroke="#D9480F" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M610,360 L605.5,351 L614.5,351 Z" fill="#D9480F"/>
+<path d="M730,388.5 L782,388.5" fill="none" stroke="#D9480F" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M790,388.5 L781,393 L781,384 Z" fill="#D9480F"/>
+<path d="M900,360 L900,251.5 Q900,243.5 892,243.5 L858,243.5 Q850,243.5 850,235.5 L850,135" fill="none" stroke="#D9480F" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="5 4"/>
+<path d="M850,127 L854.5,136 L845.5,136 Z" fill="#D9480F"/>
+<rect x="30" y="70" width="200" height="57" rx="8" fill="#FFFFFF" stroke="#C5CBD3" stroke-width="1.25" stroke-dasharray="5 4"/>
+<text x="130" y="95.2" text-anchor="middle" font-size="13" font-weight="600" fill="#1D2330">Save in Obsidian</text>
+<text x="130" y="112" text-anchor="middle" font-size="11" fill="#5C6573">file event fires</text>
+<rect x="270" y="70" width="200" height="57" rx="8" fill="#FFFFFF" stroke="#C5CBD3" stroke-width="1.25"/>
+<text x="370" y="95.2" text-anchor="middle" font-size="13" font-weight="600" fill="#1D2330">Debounce 1.5s</text>
+<text x="370" y="112" text-anchor="middle" font-size="11" fill="#5C6573">one op per path</text>
+<rect x="510" y="70" width="200" height="57" rx="8" fill="#FFFFFF" stroke="#C5CBD3" stroke-width="1.25"/>
+<text x="610" y="95.2" text-anchor="middle" font-size="13" font-weight="600" fill="#1D2330">Encrypt + queue</text>
+<text x="610" y="112" text-anchor="middle" font-size="11" fill="#5C6573">envelope written to disk</text>
+<rect x="750" y="70" width="200" height="57" rx="8" fill="#FFFFFF" stroke="#C5CBD3" stroke-width="1.25"/>
+<text x="850" y="95.2" text-anchor="middle" font-size="13" font-weight="600" fill="#1D2330">Upload blob</text>
+<text x="850" y="112" text-anchor="middle" font-size="11" fill="#5C6573">PUT to R2</text>
+<rect x="490" y="220" width="240" height="57" rx="8" fill="#EEF4FB" stroke="#9DB7D9" stroke-width="1.25"/>
+<text x="610" y="245.2" text-anchor="middle" font-size="13" font-weight="600" fill="#1D2330">Commit</text>
+<text x="610" y="262" text-anchor="middle" font-size="11" fill="#5C6573">names the base version</text>
+<rect x="140" y="360" width="220" height="57" rx="8" fill="#FFFFFF" stroke="#C5CBD3" stroke-width="1.25"/>
+<text x="250" y="385.2" text-anchor="middle" font-size="13" font-weight="600" fill="#1D2330">Committed</text>
+<text x="250" y="402" text-anchor="middle" font-size="11" fill="#5C6573">queue entry removed</text>
+<rect x="490" y="360" width="240" height="57" rx="8" fill="#FFF3EC" stroke="#EE9B74" stroke-width="1.25"/>
+<text x="610" y="385.2" text-anchor="middle" font-size="13" font-weight="600" fill="#1D2330">409 Conflict</text>
+<text x="610" y="402" text-anchor="middle" font-size="11" fill="#D9480F">someone else moved first</text>
+<rect x="790" y="360" width="220" height="57" rx="8" fill="#FFF3EC" stroke="#EE9B74" stroke-width="1.25"/>
+<text x="900" y="385.2" text-anchor="middle" font-size="13" font-weight="600" fill="#1D2330">Resolve locally</text>
+<text x="900" y="402" text-anchor="middle" font-size="11" fill="#D9480F">merge, or keep both</text>
+<rect x="858" y="178.8" width="75.6" height="18" rx="4" fill="#FFFFFF"/>
+<text x="895.8" y="191.7" text-anchor="middle" font-size="11" fill="#5C6573">then commit</text>
+<rect x="400.7" y="309.5" width="58.6" height="18" rx="4" fill="#FFFFFF"/>
+<text x="430" y="322.5" text-anchor="middle" font-size="11" fill="#5C6573">accepted</text>
+<rect x="618" y="309.5" width="53.4" height="18" rx="4" fill="#FFFFFF"/>
+<text x="644.7" y="322.5" text-anchor="middle" font-size="11" fill="#D9480F">rejected</text>
+<rect x="908" y="292.8" width="104.4" height="18" rx="4" fill="#FFFFFF"/>
+<text x="960.2" y="305.7" text-anchor="middle" font-size="11" fill="#D9480F">re-queued, retries</text>
+<text x="520" y="540" text-anchor="middle" font-size="11" fill="#5C6573">Nothing is deleted from the queue until the server has accepted it, so a crash or a dropped connection costs a retry rather than the edit.</text>
+</g>
+<line x1="24" y1="653.2" x2="46" y2="653.2" stroke="#7D8796" stroke-width="1.6"/>
+<path d="M52,653.2 L43,648.7 L43,657.7 Z" fill="#7D8796"/>
+<text x="60" y="657.2" font-size="11" fill="#5C6573">Normal path</text>
+<line x1="148.39" y1="653.2" x2="170.39" y2="653.2" stroke="#D9480F" stroke-width="1.6"/>
+<path d="M176.39,653.2 L167.39,648.7 L167.39,657.7 Z" fill="#D9480F"/>
+<text x="184.39" y="657.2" font-size="11" fill="#5C6573">Lost the race</text>
+<line x1="279.27" y1="653.2" x2="301.27" y2="653.2" stroke="#D9480F" stroke-width="1.6" stroke-dasharray="5 4"/>
+<path d="M307.27,653.2 L298.27,648.7 L298.27,657.7 Z" fill="#D9480F"/>
+<text x="315.27" y="657.2" font-size="11" fill="#5C6573">Retry</text>
+<line x1="24" y1="671.2" x2="1016" y2="671.2" stroke="#E4E7EC" stroke-width="1"/>
+<text x="24" y="691.2" font-size="12" fill="#5C6573">The server never merges. It only accepts a commit whose base version is still current, and the client decides what to do when it is not.</text>
+</svg>

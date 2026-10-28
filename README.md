@@ -107,11 +107,15 @@ open for your phone to sync, or the other way around.
 
 ## For developers
 
-- [`docs/architecture.md`](docs/architecture.md) — how the system works and
-  why it makes the tradeoffs it does, including what has gone wrong in
-  production and what it changed. Start here before touching sync code.
+- [`docs/how-it-works.md`](docs/how-it-works.md) — a functional tour with
+  diagrams: the topology, what happens on a save, what happens on a sync,
+  and how conflicts and keys are handled. **Start here.**
+- [`docs/architecture.md`](docs/architecture.md) — why it makes the
+  tradeoffs it does, including what has gone wrong in production and what
+  it changed. Read before touching sync code.
 - [`docs/protocol-spec.md`](docs/protocol-spec.md) — the wire contract
   between plugin and backend.
+- [`docs/deploy-ec2.md`](docs/deploy-ec2.md) — standing up a server.
 
 ## Known limitations
 
