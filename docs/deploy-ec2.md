@@ -135,7 +135,27 @@ If it points at a **fresh** database, every device has to register again
 and re-upload. Your notes are safe either way — they live in your vault,
 and the server only ever held encrypted copies.
 
-## 7. Afterwards
+## 7. Starting from an empty database
+
+If this deployment points at a fresh database rather than an existing
+one, the R2 bucket may still hold blobs from before. Nothing references
+them any more, and garbage collection will never find them — it only
+deletes what it can still see a row for — so they sit there consuming
+the storage allowance indefinitely.
+
+```sh
+cd packages/backend
+npx tsx scripts/r2-purge.ts --yes-delete-everything
+```
+
+Every device also has to start over: each one holds a device key, a
+vault id and a sync cursor that now point at rows which no longer
+exist. On each device, **Settings → Synora Sync → Use a different
+account → Sign out**, then register again and use **Scan vault for
+existing files** to upload. The notes themselves are never at risk —
+they live in the vault, and the server only ever held encrypted copies.
+
+## 8. Afterwards
 
 - **Retire the old Worker** once a device has synced successfully against
   the new host. Keeping it running costs nothing, and leaving it up for a
