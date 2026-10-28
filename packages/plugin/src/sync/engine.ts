@@ -400,6 +400,24 @@ export class SyncEngine {
 
     const localManifest = decodeManifest(decryptEnvelope(vaultKey, decodeEnvelope(localPayload)));
 
+    // The remote version may have moved the file. Both branches below
+    // write at *our* path and repoint the local record there, so a copy
+    // this device already wrote at the remote's path would be left
+    // behind with nothing referencing it - orphaned on disk, and
+    // present on this device only, so the vaults never agree again.
+    //
+    // pull() has always cleaned this up when applying a plain remote
+    // rename; resolving a conflict reaches the same situation by a
+    // different route and was missing it. Found by the multi-device
+    // simulation, where one device ended up holding a file that the
+    // device which created it did not.
+    const stale = await state.findByFileId(remoteFileId);
+    if (stale && stale.logicalPath !== op.logicalPath) {
+      suppressor.markApplied(stale.logicalPath, DELETION_MARK);
+      await vault.delete(stale.logicalPath);
+      await state.remove(stale.logicalPath);
+    }
+
     // Our edit raced a delete made somewhere else.
     //
     // A delete can be redone in a second; writing that someone did not
