@@ -473,12 +473,31 @@ export class SyncEngine {
 
     // No clean merge (binary content, missing base, or genuinely
     // overlapping edits) - preserve the remote version at its normal path.
+    //
+    // That path is the one the remote version names, which is not
+    // necessarily ours: if the edit that just lost was a rename, we
+    // wanted the file somewhere the server never accepted. Writing the
+    // remote content at our path instead - which is what this did -
+    // leaves the device permanently disagreeing with the server about
+    // where the file lives, and nothing corrects it unless that same
+    // file happens to change again later. The comment above was right
+    // and the code underneath it was not.
+    const remotePath = remoteManifest.logicalPath;
     const hash = toHex(sha256(remoteManifest.content));
-    suppressor.markApplied(op.logicalPath, hash);
-    await vault.write(op.logicalPath, remoteManifest.content);
-    await state.upsert({ fileId: remoteFileId, logicalPath: op.logicalPath, currentVersionId: remoteVersionId, contentHash: hash });
+    suppressor.markApplied(remotePath, hash);
+    await vault.write(remotePath, remoteManifest.content);
+    await state.upsert({ fileId: remoteFileId, logicalPath: remotePath, currentVersionId: remoteVersionId, contentHash: hash });
 
     await this.fileAsConflictCopy(op, localPayload);
+
+    // Our rename lost, so the path we had moved the file to is now
+    // neither where the remote version lives nor the conflict copy. Left
+    // alone it is an orphan only this device can see.
+    if (op.logicalPath !== remotePath) {
+      suppressor.markApplied(op.logicalPath, DELETION_MARK);
+      await vault.delete(op.logicalPath);
+      await state.remove(op.logicalPath);
+    }
   }
 
   // A version that's genuinely gone just means we can't merge against
