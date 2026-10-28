@@ -3,7 +3,7 @@ import { eq, and, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { AppEnv } from "../context.js";
 import { users, devices } from "../db/schema.js";
-import { hashPassword, verifyPassword } from "../auth/password.js";
+import { hashPassword, checkPassword } from "../auth/password.js";
 import { issueAccessToken } from "../auth/jwt.js";
 import { checkRateLimit } from "../auth/rate-limit.js";
 import { badRequest, unauthorized, serviceUnavailable, tooManyRequests, deviceLimitExceeded } from "../lib/errors.js";
@@ -82,8 +82,27 @@ authRoutes.post("/login", async (c) => {
   const body = loginSchema.parse(await c.req.json());
 
   const [user] = await c.env.DB.select().from(users).where(eq(users.email, body.email)).limit(1);
-  if (!user || !(await verifyPassword(body.password, user.passwordHash))) {
+  const check = user
+    ? await checkPassword(body.password, user.passwordHash)
+    : { valid: false, needsRehash: false };
+  if (!user || !check.valid) {
     throw unauthorized("Invalid email or password");
+  }
+
+  // A correct password stored under the superseded scheme is upgraded
+  // here, because this is the only moment the plaintext exists. Done
+  // after the check so a wrong guess never triggers a write, and
+  // tolerant of failure: a login is not worth refusing over a
+  // bookkeeping update that the next one will retry anyway.
+  if (check.needsRehash) {
+    try {
+      await c.env.DB
+        .update(users)
+        .set({ passwordHash: await hashPassword(body.password) })
+        .where(eq(users.id, user.id));
+    } catch (err) {
+      console.error(`Could not upgrade the stored password for ${user.id}`, err);
+    }
   }
 
   let [device] = await c.env.DB.select()

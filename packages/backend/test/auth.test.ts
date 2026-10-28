@@ -5,6 +5,22 @@ import { users, devices } from "../src/db/schema.js";
 import { resetDb, testBindings, closeTestDb } from "./setup.js";
 import { registerUser } from "./helpers.js";
 
+// Reproduces what the superseded scheme wrote, so the upgrade path is
+// exercised against the real stored format.
+async function legacyPbkdf2Hash(password: string, iterations = 100_000): Promise<string> {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const keyMaterial = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, [
+    "deriveBits",
+  ]);
+  const derived = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", salt, iterations, hash: "SHA-256" },
+    keyMaterial,
+    256,
+  );
+  const hex = (b: ArrayBuffer) => Array.from(new Uint8Array(b)).map((x) => x.toString(16).padStart(2, "0")).join("");
+  return `pbkdf2$${iterations}$${hex(salt.buffer as ArrayBuffer)}$${hex(derived)}`;
+}
+
 describe("auth", () => {
   beforeEach(resetDb);
   afterAll(closeTestDb);
@@ -201,5 +217,32 @@ describe("auth", () => {
 
     const fourth = await login("device-4-key");
     expect(fourth.status).toBe(200);
+  });
+
+  it("upgrades a legacy password hash on a successful login", async () => {
+    const bindings = testBindings();
+    const alice = await registerUser(bindings, "alice@example.com");
+
+    // Put the account back on the superseded scheme, as a restored
+    // backup from before the change would be.
+    const legacy = await legacyPbkdf2Hash("password123");
+    await bindings.DB.update(users).set({ passwordHash: legacy }).where(eq(users.id, alice.userId));
+
+    const res = await app.request(
+      "/v1/auth/login",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: "alice@example.com", password: "password123", devicePublicKey: "pk-rehash" }),
+      },
+      bindings,
+    );
+    expect(res.status).toBe(200);
+
+    // The login worked AND quietly moved the stored hash forward, which
+    // is the only moment the plaintext is available to do it.
+    const [after] = await bindings.DB.select().from(users).where(eq(users.id, alice.userId));
+    expect(after!.passwordHash.startsWith("$argon2id$")).toBe(true);
+    expect(after!.passwordHash).not.toBe(legacy);
   });
 });

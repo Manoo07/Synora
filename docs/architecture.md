@@ -171,8 +171,7 @@ catches tampering. Different failure modes, both covered.
 
 ### Authentication is deliberately boring
 
-Account auth is a standard password hash plus bearer tokens, using a
-reviewed library. **Do not invent authentication here.** It is tempting,
+Account auth is argon2id plus bearer tokens, using a reviewed library. **Do not invent authentication here.** It is tempting,
 because the vault key hierarchy is already bespoke cryptography and account
 auth looks like more of the same. It is not the same: the key hierarchy
 exists because no off-the-shelf scheme does what C1 requires, whereas
