@@ -105,7 +105,7 @@ describe("multi-device simulation", () => {
     // is how a failure gets from "some seed broke" to a sequence you can
     // read. Every step is logged in order: who did what, to which file.
     const only = process.env.SIM_SEED ? Number(process.env.SIM_SEED) : null;
-    for (let seed = only ?? 0; seed <= (only ?? 59); seed++) {
+    for (let seed = only ?? 0; seed <= (only ?? 399); seed++) {
       new FakeApiServer().install(VAULT_ID);
       const rng = mulberry32(seed * 7919 + 13);
       const vaultKey = generateVaultKey();

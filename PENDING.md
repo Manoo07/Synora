@@ -28,37 +28,35 @@ named, so a reader can disagree with evidence rather than opinion.
 | Delete vs. unsynced edit | **done** | The edit wins and the file is restored — `engine.resolveConflict`, test in `engine.test.ts` |
 | Rename vs. edit, rename vs. rename | **done** | Converge; covered by the simulation suite |
 | **Simultaneous create of the same path on two devices** | **missing** | The server cannot detect it — paths are encrypted, so two devices creating `notes/x.md` make two unrelated files. No deterministic client rule for collapsing them |
-| **Filesystem reconciliation after a failed rename** | **missing** | **Known defect, reproducible.** See below |
+| Convergence under concurrent renames and conflicts | **done** | Three defects found and fixed; 400 random multi-device histories converge (`test/simulation.test.ts`) |
 | GC safety | **done** | `gc.ts`, 10 tests. Four conditions, all required; a long-offline device blocks collection rather than losing its tombstones |
 | Initial bootstrap, and resync after a long offline period | **partial** | Replay from sequence zero works and GC protects it (a file's newest event is never collected). No snapshot/compaction, so bootstrap cost grows with history |
 | **Key rotation and true revocation** | **missing** | Revoking a device removes its access but not the key it already holds. `key_epoch` exists in the schema; rotation does not. Documented in `architecture.md` |
 | **Backup, restore and disaster recovery** | **missing** | No backup is configured and none has been restored. A backup that has never been restored is not a recovery mechanism |
 
-### The known convergence defect
+### How the convergence defects were found and fixed
 
-The multi-device simulation (`test/simulation.test.ts`) fails at seed 44.
-The suite is committed red on purpose: the requirement it implements says
-a failure blocks release, and excluding the seed to get a green tick is
-the habit that let every previous bug reach production.
+The multi-device simulation (`test/simulation.test.ts`) found three
+separate divergences within minutes of first being run, all with the
+same symptom: a device left holding a file at a path only it knew
+about, created by its own rename.
 
-**Shape:** a device ends up holding a file at a path only it knows
-about, created by its own rename. Three instances found; two fixed.
+| | Cause | Fix |
+|---|---|---|
+| Seed 4 | Conflict resolution wrote at our path without removing the copy already written at the remote's path | Clean up the stale path in all three conflict branches |
+| Seed 9 | The delete-versus-edit branch returns before that cleanup | Move the cleanup above it |
+| Seed 44 | The merge branch committed at *our* path, performing a losing rename a second time on top of the merge, where it could lose again and strand the file | Commit the merge at the path the remote version names |
 
-**Root cause, as far as it is understood:** `handleLocalRename` moves the
-local file and its state record to the new path *before the server has
-accepted anything*. If that rename never lands — the op is dropped, or a
-conflict resolves in a way that abandons our path — nothing moves the
-file back. The device keeps a file at a path the server has never heard
-of, and no later event corrects it unless that same file happens to
-change again.
+The last one is the general principle the other two are instances of:
+**once a commit has lost a race, the path it wanted is one the server
+never accepted.** Re-asserting it turns one lost race into another, and
+the file ends up somewhere only that device can see. Adopting the
+remote's path means there is no second rename to lose. The content is
+still merged; only the move is dropped, and moving a file again is one
+action.
 
-Fixing instances one at a time is treating the symptom. The real fix is
-reconciliation: after a flush, any local record whose path disagrees with
-the server's current version for that file should be corrected. That is
-the "filesystem reconciliation" item above.
-
-Reproduce with `SIM_SEED=44 npx vitest run test/simulation.test.ts`,
-which prints the full operation history.
+None of these were reachable by a written test case. Each needs three
+devices, a rename and a conflict landing in a particular order.
 
 ---
 

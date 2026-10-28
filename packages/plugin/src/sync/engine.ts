@@ -446,16 +446,32 @@ export class SyncEngine {
 
     const merged = await this.tryTextMerge(op, remoteManifest.content, localManifest.content);
     if (merged) {
+      // The merge is committed at the path the REMOTE version names,
+      // not ours.
+      //
+      // Reaching here means our commit already lost a race, and if the
+      // edit that lost was a rename then our path is one the server
+      // never accepted. Committing the merge there would quietly
+      // perform that rename a second time, on top of the merge - and
+      // that commit can lose a race of its own, leaving the file
+      // stranded at a path only this device knows about while everyone
+      // else converges elsewhere. Adopting the remote's path means
+      // there is no second rename to lose.
+      //
+      // The cost is that a rename which loses a race is dropped while
+      // its content is still merged. That is the right way round: the
+      // writing survives, and moving the file again is one action.
+      const targetPath = remoteManifest.logicalPath;
       const hash = toHex(sha256(merged));
-      suppressor.markApplied(op.logicalPath, hash);
-      await vault.write(op.logicalPath, merged);
+      suppressor.markApplied(targetPath, hash);
+      await vault.write(targetPath, merged);
 
-      const manifestBytes = encodeManifest({ fileId: remoteFileId, logicalPath: op.logicalPath, content: merged });
-      const envelope = encodeEnvelope(encryptEnvelope(vaultKey, vaultId, remoteFileId, contextFor(op.logicalPath), manifestBytes));
+      const manifestBytes = encodeManifest({ fileId: remoteFileId, logicalPath: targetPath, content: merged });
+      const envelope = encodeEnvelope(encryptEnvelope(vaultKey, vaultId, remoteFileId, contextFor(targetPath), manifestBytes));
       await queue.remove(op.idempotencyKey);
       await queue.enqueue({
         idempotencyKey: crypto.randomUUID(),
-        logicalPath: op.logicalPath,
+        logicalPath: targetPath,
         fileId: remoteFileId,
         baseVersionId: remoteVersionId,
         // Both sides this merge joins. tryTextMerge only returns
@@ -467,7 +483,14 @@ export class SyncEngine {
         sizeBytes: envelope.byteLength,
         enqueuedAt: Date.now(),
       }, envelope);
-      await state.upsert({ fileId: remoteFileId, logicalPath: op.logicalPath, currentVersionId: remoteVersionId, contentHash: hash });
+      await state.upsert({ fileId: remoteFileId, logicalPath: targetPath, currentVersionId: remoteVersionId, contentHash: hash });
+
+      // Our losing rename's target is now referenced by nothing.
+      if (op.logicalPath !== targetPath) {
+        suppressor.markApplied(op.logicalPath, DELETION_MARK);
+        await vault.delete(op.logicalPath);
+        await state.remove(op.logicalPath);
+      }
       return;
     }
 
